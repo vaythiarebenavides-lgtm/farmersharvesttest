@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FarmersHarvest — Find Your Content</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<style>
+:root {
+  --soil: #1a1208;
+  --bark: #2d2010;
+  --harvest: #c8a035;
+  --harvest-light: #f0cc6a;
+  --leaf: #4a7c3f;
+  --leaf-light: #6aaa5c;
+  --cream: #faf6ee;
+  --parchment: #f0e8d4;
+  --mist: #e8e0cc;
+  --text: #1a1208;
+  --text-mid: #5a4a2a;
+  --text-faint: #8a7a5a;
+  --sans: 'Inter', system-ui, sans-serif;
+  --serif: 'DM Serif Display', Georgia, serif;
+  --r: 10px;
+  --rl: 16px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--sans); background: var(--cream); color: var(--text); min-height: 100vh; font-size: 14px; }
+
+/* TOPBAR */
+.topbar { background: var(--soil); height: 58px; display: flex; align-items: center; padding: 0 2rem; gap: 16px; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(200,160,53,0.3); }
+.logo { display: flex; align-items: center; gap: 10px; color: var(--harvest); font-family: var(--serif); font-size: 20px; }
+.logo-icon { width: 32px; height: 32px; background: var(--harvest); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; color: var(--soil); }
+.topbar-sub { font-size: 11px; color: rgba(255,255,255,0.35); margin-left: 4px; }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.tbadge { font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 20px; background: rgba(200,160,53,0.15); color: var(--harvest); border: 1px solid rgba(200,160,53,0.3); }
+.tbadge.coming { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4); border-color: rgba(255,255,255,0.1); }
+
+/* LAYOUT */
+.layout { display: grid; grid-template-columns: 260px 1fr; min-height: calc(100vh - 58px); }
+
+/* SIDEBAR */
+.sidebar { background: var(--bark); padding: 1.5rem 1rem; display: flex; flex-direction: column; gap: 2px; border-right: 1px solid rgba(200,160,53,0.15); }
+.slbl { font-size: 10px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: rgba(200,160,53,0.5); padding: 10px 10px 4px; }
+.sitem { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: var(--r); color: rgba(255,255,255,0.5); font-size: 13px; cursor: pointer; text-decoration: none; transition: background 0.1s, color 0.1s; }
+.sitem:hover { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.8); }
+.sitem.active { background: rgba(200,160,53,0.15); color: var(--harvest); font-weight: 500; }
+.sitem i { width: 16px; text-align: center; font-size: 14px; }
+.sitem .ctag { margin-left: auto; font-size: 9px; font-weight: 600; padding: 2px 6px; border-radius: 20px; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.3); }
+.sspacer { flex: 1; }
+.sstatus { background: rgba(0,0,0,0.2); border-radius: var(--r); padding: 12px; border: 1px solid rgba(200,160,53,0.1); }
+.sstatus-title { font-size: 10px; font-weight: 600; color: rgba(200,160,53,0.5); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+.prow { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: rgba(255,255,255,0.4); }
+.pdot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.pdot.active { background: var(--leaf-light); }
+.pdot.pending { background: var(--harvest); }
+.pdot.soon { background: rgba(255,255,255,0.2); }
+
+/* MAIN */
+.main { padding: 2rem; overflow-y: auto; }
+
+/* HERO */
+.hero { background: linear-gradient(135deg, var(--soil) 0%, var(--bark) 100%); border-radius: var(--rl); padding: 2.5rem; margin-bottom: 1.5rem; position: relative; overflow: hidden; border: 1px solid rgba(200,160,53,0.2); }
+.hero::before { content: ''; position: absolute; top: -40px; right: -40px; width: 200px; height: 200px; background: radial-gradient(circle, rgba(200,160,53,0.15) 0%, transparent 70%); border-radius: 50%; }
+.hero-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--harvest); margin-bottom: 10px; }
+.hero-title { font-family: var(--serif); font-size: 28px; color: #fff; line-height: 1.2; margin-bottom: 10px; }
+.hero-title span { color: var(--harvest); }
+.hero-sub { font-size: 13px; color: rgba(255,255,255,0.5); max-width: 480px; line-height: 1.6; margin-bottom: 1.5rem; }
+.hero-search { display: flex; gap: 10px; max-width: 560px; }
+.search-wrap { flex: 1; display: flex; align-items: center; background: rgba(255,255,255,0.08); border: 1px solid rgba(200,160,53,0.3); border-radius: var(--r); padding: 0 14px; gap: 10px; transition: border-color 0.15s; }
+.search-wrap:focus-within { border-color: var(--harvest); }
+.search-wrap i { color: var(--harvest); font-size: 14px; }
+.search-wrap input { flex: 1; background: none; border: none; outline: none; font-family: var(--sans); font-size: 14px; color: #fff; padding: 12px 0; }
+.search-wrap input::placeholder { color: rgba(255,255,255,0.3); }
+.btn-harvest { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: var(--r); background: var(--harvest); color: var(--soil); font-family: var(--sans); font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: background 0.1s, transform 0.05s; white-space: nowrap; }
+.btn-harvest:hover { background: var(--harvest-light); }
+.btn-harvest:active { transform: scale(0.98); }
+.btn-harvest:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* PLATFORM PILLS */
+.platform-row { display: flex; gap: 8px; margin-top: 1rem; flex-wrap: wrap; }
+.platform-pill { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid transparent; transition: all 0.1s; user-select: none; }
+.platform-pill.yt { background: rgba(255,0,0,0.1); color: #ff6b6b; border-color: rgba(255,0,0,0.2); }
+.platform-pill.yt.active { background: rgba(255,0,0,0.2); border-color: #ff4444; }
+.platform-pill.tt { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5); border-color: rgba(255,255,255,0.1); }
+.platform-pill.meta { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5); border-color: rgba(255,255,255,0.1); }
+.soon-lbl { font-size: 9px; opacity: 0.6; }
+
+/* SECTION CARDS */
+.sc { background: #fff; border: 1px solid var(--mist); border-radius: var(--rl); margin-bottom: 1rem; overflow: hidden; }
+.sh { display: flex; align-items: center; justify-content: space-between; padding: 12px 1.25rem; border-bottom: 1px solid var(--mist); background: var(--parchment); }
+.sh-left { display: flex; align-items: center; gap: 8px; }
+.sh-left i { font-size: 13px; color: var(--text-faint); }
+.sh-label { font-size: 12px; font-weight: 600; color: var(--text-mid); text-transform: uppercase; letter-spacing: 0.5px; }
+.sh-count { font-size: 11px; color: var(--text-faint); background: var(--mist); padding: 2px 8px; border-radius: 20px; }
+.sb { padding: 1.25rem; }
+
+/* FILTERS */
+.filter-bar { display: flex; gap: 8px; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+.filter-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--mist); background: #fff; color: var(--text-mid); transition: all 0.1s; }
+.filter-btn:hover { border-color: var(--harvest); color: var(--harvest); }
+.filter-btn.active { background: var(--harvest); color: var(--soil); border-color: var(--harvest); font-weight: 600; }
+.filter-divider { width: 1px; height: 24px; background: var(--mist); margin: 0 4px; }
+.filter-select { padding: 6px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; border: 1px solid var(--mist); background: #fff; color: var(--text-mid); cursor: pointer; font-family: var(--sans); outline: none; }
+.filter-select:focus { border-color: var(--harvest); }
+.date-range { display: flex; align-items: center; gap: 6px; }
+.date-input { padding: 5px 10px; border-radius: 20px; font-size: 12px; border: 1px solid var(--mist); background: #fff; color: var(--text-mid); font-family: var(--sans); outline: none; cursor: pointer; }
+.date-input:focus { border-color: var(--harvest); }
+.date-label { font-size: 11px; color: var(--text-faint); }
+
+/* RESULTS GRID */
+.results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.result-card { background: var(--cream); border: 1px solid var(--mist); border-radius: var(--r); overflow: hidden; transition: box-shadow 0.15s, transform 0.1s; cursor: pointer; }
+.result-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.1); transform: translateY(-2px); }
+.result-thumb { width: 100%; aspect-ratio: 9/16; background: linear-gradient(135deg, var(--bark) 0%, var(--soil) 100%); display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+.result-thumb.landscape { aspect-ratio: 16/9; }
+.result-thumb-placeholder { display: flex; flex-direction: column; align-items: center; gap: 8px; color: rgba(200,160,53,0.4); }
+.result-thumb-placeholder i { font-size: 28px; }
+.result-thumb-placeholder span { font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; }
+.result-platform-badge { position: absolute; top: 8px; left: 8px; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; background: rgba(0,0,0,0.6); }
+.result-platform-badge.yt { color: #ff4444; }
+.result-platform-badge.tt { color: #fff; }
+.result-platform-badge.meta { color: #4a9eff; }
+.result-play-btn { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 44px; height: 44px; border-radius: 50%; background: rgba(200,160,53,0.9); color: var(--soil); display: flex; align-items: center; justify-content: center; font-size: 16px; opacity: 0; transition: opacity 0.15s; border: none; cursor: pointer; padding-left: 3px; }
+.result-card:hover .result-play-btn { opacity: 1; }
+.result-dl-btn { position: absolute; bottom: 8px; right: 8px; width: 32px; height: 32px; border-radius: 8px; background: var(--harvest); color: var(--soil); display: flex; align-items: center; justify-content: center; font-size: 13px; opacity: 0; transition: opacity 0.15s; cursor: pointer; border: none; }
+.result-card:hover .result-dl-btn { opacity: 1; }
+.result-info { padding: 10px 12px; }
+.result-title { font-size: 12px; font-weight: 500; color: var(--text); margin-bottom: 4px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.result-meta { display: flex; align-items: center; justify-content: space-between; }
+.result-views { font-size: 11px; color: var(--text-faint); }
+.result-creator { font-size: 11px; color: var(--harvest); font-weight: 500; }
+.result-date { font-size: 10px; color: var(--text-faint); margin-top: 3px; }
+.result-product-tag { display: inline-block; font-size: 10px; background: rgba(200,160,53,0.12); color: var(--harvest); padding: 2px 6px; border-radius: 20px; margin-top: 4px; font-weight: 500; }
+
+/* VIDEO MODAL */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 1000; display: none; align-items: center; justify-content: center; }
+.modal-overlay.show { display: flex; }
+.modal { background: var(--soil); border-radius: var(--rl); overflow: hidden; width: 90%; max-width: 800px; border: 1px solid rgba(200,160,53,0.2); }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid rgba(200,160,53,0.1); }
+.modal-title { font-size: 14px; font-weight: 500; color: #fff; flex: 1; margin-right: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.modal-close { width: 30px; height: 30px; border-radius: 8px; background: rgba(255,255,255,0.08); border: none; color: rgba(255,255,255,0.6); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+.modal-close:hover { background: rgba(255,255,255,0.14); color: #fff; }
+.modal-video { width: 100%; aspect-ratio: 16/9; background: #000; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.3); font-size: 13px; flex-direction: column; gap: 8px; }
+.modal-video i { font-size: 36px; color: rgba(200,160,53,0.4); }
+.modal-footer { padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid rgba(200,160,53,0.1); }
+.modal-meta { font-size: 12px; color: rgba(255,255,255,0.4); }
+.modal-meta span { color: var(--harvest); font-weight: 500; }
+.btn-dl { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--r); background: var(--harvest); color: var(--soil); font-size: 13px; font-weight: 600; border: none; cursor: pointer; }
+.btn-dl:hover { background: var(--harvest-light); }
+
+/* EMPTY STATE */
+.empty-state { text-align: center; padding: 3rem 2rem; color: var(--text-faint); }
+.empty-icon { width: 56px; height: 56px; background: var(--parchment); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; font-size: 22px; color: var(--harvest); }
+.empty-title { font-size: 15px; font-weight: 600; color: var(--text-mid); margin-bottom: 6px; }
+.empty-sub { font-size: 13px; color: var(--text-faint); line-height: 1.5; max-width: 320px; margin: 0 auto; }
+
+/* COMING SOON BANNER */
+.coming-soon-banner { background: linear-gradient(135deg, rgba(200,160,53,0.1), rgba(200,160,53,0.05)); border: 1px solid rgba(200,160,53,0.25); border-radius: var(--r); padding: 14px 16px; display: flex; align-items: center; gap: 12px; margin-bottom: 1rem; }
+.coming-soon-banner i { font-size: 18px; color: var(--harvest); flex-shrink: 0; }
+.csb-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+.csb-sub { font-size: 12px; color: var(--text-faint); }
+
+/* STATS */
+.stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 1.5rem; }
+.stat-card { background: #fff; border: 1px solid var(--mist); border-radius: var(--r); padding: 14px 16px; }
+.stat-num { font-family: var(--serif); font-size: 28px; color: var(--text); line-height: 1; margin-bottom: 4px; }
+.stat-num span { color: var(--harvest); }
+.stat-lbl { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
+
+/* QUEUE */
+.dq-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--mist); }
+.dq-item:last-child { border-bottom: none; }
+.dq-thumb { width: 48px; height: 48px; border-radius: 8px; background: linear-gradient(135deg, var(--bark), var(--soil)); display: flex; align-items: center; justify-content: center; color: var(--harvest); font-size: 18px; flex-shrink: 0; }
+.dq-info { flex: 1; }
+.dq-title { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 2px; }
+.dq-meta { font-size: 11px; color: var(--text-faint); }
+.dq-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--harvest); background: transparent; color: var(--harvest); transition: all 0.1s; }
+.dq-btn:hover { background: var(--harvest); color: var(--soil); }
+.dq-btn.downloaded { background: var(--leaf); color: #fff; border-color: var(--leaf); cursor: default; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">
+    <div class="logo-icon"><i class="fa-solid fa-seedling"></i></div>
+    FarmersHarvest
+  </div>
+  <span class="topbar-sub">UGC Content Finder</span>
+  <div class="topbar-right">
+    <span class="tbadge">Farmers Defense</span>
+    <span class="tbadge coming">Beta</span>
+  </div>
+</div>
+
+<div class="layout">
+<div class="sidebar">
+  <div class="slbl">Navigation</div>
+  <a class="sitem active" href="#"><i class="fa-solid fa-magnifying-glass"></i> Search Content</a>
+  <a class="sitem" href="#"><i class="fa-solid fa-download"></i> Download Queue <span class="ctag" id="sideQueueCount">0</span></a>
+  <a class="sitem" href="#"><i class="fa-solid fa-folder-open"></i> Saved Collections</a>
+  <a class="sitem" href="#"><i class="fa-solid fa-chart-simple"></i> Analytics <span class="ctag">Soon</span></a>
+  <div class="slbl" style="margin-top:8px">Platforms</div>
+  <a class="sitem active" id="yt-nav" href="#" onclick="setPlatform('yt',this)"><i class="fa-brands fa-youtube" style="color:#ff4444"></i> YouTube</a>
+  <a class="sitem" id="tt-nav" href="#" onclick="setPlatform('tt',this)"><i class="fa-brands fa-tiktok" style="color:#fff"></i> TikTok</a>
+  <a class="sitem" id="meta-nav" href="#" onclick="setPlatform('meta',this)"><i class="fa-brands fa-meta" style="color:#4a9eff"></i> Meta (IG + FB)</a>
+  <div class="sspacer"></div>
+  <div class="sstatus">
+    <div class="sstatus-title">API Status</div>
+    <div class="prow"><div class="pdot active"></div> YouTube — Connected</div>
+    <div class="prow"><div class="pdot active"></div> TikTok — Connected</div>
+    <div class="prow"><div class="pdot active"></div> Meta — Connected</div>
+  </div>
+</div>
+
+<div class="main">
+
+  <div class="hero">
+    <div class="hero-eyebrow"><i class="fa-solid fa-seedling"></i> &nbsp;FarmersHarvest</div>
+    <div class="hero-title">Find every piece of content<br>about <span>Farmers Defense</span></div>
+    <div class="hero-sub">Search hashtags, keywords, and creator handles across platforms. Preview inline and download UGC content in one place.</div>
+    <div class="hero-search">
+      <div class="search-wrap">
+        <i class="fa-solid fa-hashtag"></i>
+        <input type="text" id="searchInput" placeholder="farmersdefense, UV protection, garden gloves...">
+      </div>
+      <button class="btn-harvest" onclick="runSearch()"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
+    </div>
+    <div class="platform-row">
+      <div class="platform-pill yt active" id="pill-yt" onclick="setPlatform('yt',null)"><i class="fa-brands fa-youtube"></i> YouTube</div>
+      <div class="platform-pill tt" id="pill-tt" onclick="setPlatform('tt',null)" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.7);border-color:rgba(255,255,255,0.2)"><i class="fa-brands fa-tiktok"></i> TikTok</div>
+      <div class="platform-pill meta" id="pill-meta" onclick="setPlatform('meta',null)" style="background:rgba(74,158,255,0.1);color:#7ab8ff;border-color:rgba(74,158,255,0.2)"><i class="fa-brands fa-meta"></i> Meta</div>
+    </div>
+  </div>
+
+
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="stat-num" id="statResults">0</div><div class="stat-lbl">Results found</div></div>
+    <div class="stat-card"><div class="stat-num" id="statDownloaded">0</div><div class="stat-lbl">Downloaded</div></div>
+    <div class="stat-card"><div class="stat-num"><span id="statPlatforms">3</span></div><div class="stat-lbl">Platforms active</div></div>
+  </div>
+
+  <div class="sc">
+    <div class="sh">
+      <div class="sh-left"><i class="fa-solid fa-film"></i><span class="sh-label">Search results</span></div>
+      <span class="sh-count" id="resultsCount">0 results</span>
+    </div>
+    <div class="sb">
+
+      <!-- FILTER BAR -->
+      <div class="filter-bar">
+        <button class="filter-btn active" onclick="setFilter(this,'all')">All</button>
+        <button class="filter-btn" onclick="setFilter(this,'video')"><i class="fa-solid fa-video"></i> Video</button>
+        <button class="filter-btn" onclick="setFilter(this,'short')"><i class="fa-solid fa-mobile-screen"></i> Shorts</button>
+        <div class="filter-divider"></div>
+        <button class="filter-btn" onclick="setFilter(this,'popular')"><i class="fa-solid fa-fire"></i> Most popular</button>
+        <button class="filter-btn" onclick="setFilter(this,'recent')"><i class="fa-regular fa-clock"></i> Most recent</button>
+        <div class="filter-divider"></div>
+        <button class="filter-btn" onclick="setFilter(this,'youtube')" style="color:#ff4444"><i class="fa-brands fa-youtube"></i> YouTube</button>
+        <button class="filter-btn" onclick="setFilter(this,'tiktok')"><i class="fa-brands fa-tiktok"></i> TikTok</button>
+        <div class="filter-divider"></div>
+        <!-- Product filter -->
+        <select class="filter-select" id="productFilter" onchange="applyFilters()">
+          <option value="">All products</option>
+          <option>UV Crew neck</option>
+          <option>Sleeves</option>
+          <option>Sun Hats</option>
+          <option>Venture Hats</option>
+          <option>Gloves</option>
+          <option>Nitrile Gloves</option>
+          <option>UV Hoodie</option>
+          <option>UV Zip Hoodie</option>
+          <option>Canvas Apron</option>
+          <option>Lightweight Apron</option>
+          <option>Snap Back</option>
+          <option>Leg Sleeves</option>
+          <option>Winter Gloves</option>
+          <option>General Products</option>
+        </select>
+        <!-- Date filter -->
+        <div class="date-range">
+          <span class="date-label">From</span>
+          <input type="date" class="date-input" id="dateFrom" onchange="applyFilters()">
+          <span class="date-label">to</span>
+          <input type="date" class="date-input" id="dateTo" onchange="applyFilters()">
+        </div>
+      </div>
+
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon"><i class="fa-solid fa-seedling"></i></div>
+        <div class="empty-title">Ready to harvest</div>
+        <div class="empty-sub">Type a hashtag or keyword above and hit Search to find content featuring Farmers Defense products.</div>
+      </div>
+
+      <div class="results-grid" id="resultsGrid" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="sc">
+    <div class="sh">
+      <div class="sh-left"><i class="fa-solid fa-download"></i><span class="sh-label">Download queue</span></div>
+      <span class="sh-count" id="queueCount">0 items</span>
+    </div>
+    <div class="sb">
+      <div class="empty-state" id="queueEmpty" style="padding:1.5rem 0">
+        <div class="empty-icon" style="width:40px;height:40px;font-size:16px"><i class="fa-solid fa-inbox"></i></div>
+        <div class="empty-title" style="font-size:13px">No downloads yet</div>
+        <div class="empty-sub" style="font-size:12px">Click the download icon on any result to add it here.</div>
+      </div>
+      <div id="queueList" style="display:none"></div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- VIDEO MODAL -->
+<div class="modal-overlay" id="videoModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modalTitle">Video title</div>
+      <button class="modal-close" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-video" id="modalVideo">
+      <i class="fa-solid fa-play-circle"></i>
+      <span>Video plays here when connected to YouTube API</span>
+    </div>
+    <div class="modal-footer">
+      <div class="modal-meta" id="modalMeta">by <span>@creator</span> · 0 views</div>
+      <button class="btn-dl" id="modalDlBtn"><i class="fa-solid fa-download"></i> Download</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let queue = [];
+let searchResults = [];
+let activeFilter = 'all';
+let currentModalId = null;
+
+const PRODUCTS = ['UV Crew neck','Sleeves','Sun Hats','Venture Hats','Gloves','UV Hoodie','Canvas Apron','Winter Gloves','General Products'];
+
+function showComingSoon(name){
+  alert(name+' integration is coming soon! The API application has been submitted and will be connected once approved.');
+}
+
+function setFilter(btn, filter){
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  activeFilter = filter;
+  applyFilters();
+}
+
+function applyFilters(){
+  let filtered = [...searchResults];
+  // Type filter
+  if(activeFilter==='video') filtered=filtered.filter(r=>r.type==='video');
+  else if(activeFilter==='short') filtered=filtered.filter(r=>r.type==='short');
+  else if(activeFilter==='popular') filtered=[...filtered].sort((a,b)=>b.viewsNum-a.viewsNum);
+  else if(activeFilter==='recent') filtered=[...filtered].sort((a,b)=>new Date(b.date)-new Date(a.date));
+  else if(activeFilter==='youtube') filtered=filtered.filter(r=>r.platform==='yt');
+  else if(activeFilter==='tiktok') filtered=filtered.filter(r=>r.platform==='tt');
+  // Product filter
+  const prod = document.getElementById('productFilter').value;
+  if(prod) filtered=filtered.filter(r=>r.product===prod);
+  // Date filter
+  const df = document.getElementById('dateFrom').value;
+  const dt = document.getElementById('dateTo').value;
+  if(df) filtered=filtered.filter(r=>new Date(r.date)>=new Date(df));
+  if(dt) filtered=filtered.filter(r=>new Date(r.date)<=new Date(dt));
+  renderResults(filtered);
+}
+
+async function runSearch(){
+  const query = document.getElementById('searchInput').value.trim();
+  if(!query) return;
+  document.getElementById('emptyState').style.display='none';
+  document.getElementById('resultsGrid').style.display='none';
+  const btn = document.querySelector('.btn-harvest');
+  btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Searching...';
+  btn.disabled=true;
+
+  try {
+    if(currentPlatform === 'tt'){
+      searchResults = generateTikTokResults(query);
+    } else if(currentPlatform === 'meta'){
+      searchResults = generateMetaResults(query);
+    } else {
+      // Real YouTube API call
+      const order = activeFilter === 'popular' ? 'viewCount' : activeFilter === 'recent' ? 'date' : 'relevance';
+      const df = document.getElementById('dateFrom').value;
+      const dt = document.getElementById('dateTo').value;
+      let url = `/api/search?query=${encodeURIComponent(query)}&maxResults=12&order=${order}`;
+      if(df) url += `&publishedAfter=${df}`;
+      if(dt) url += `&publishedBefore=${dt}`;
+      const r = await fetch(url);
+      const d = await r.json();
+      if(d.ok){ searchResults = d.results; }
+      else { throw new Error(d.error); }
+    }
+    document.getElementById('statResults').textContent = searchResults.length;
+    document.getElementById('resultsCount').textContent = searchResults.length + ' results';
+    applyFilters();
+  } catch(err) {
+    console.error(err);
+    document.getElementById('emptyState').style.display='block';
+    document.getElementById('emptyState').querySelector('.empty-title').textContent = 'Search failed';
+    document.getElementById('emptyState').querySelector('.empty-sub').textContent = err.message;
+  }
+
+  btn.innerHTML='<i class="fa-solid fa-magnifying-glass"></i> Search';
+  btn.disabled=false;
+}
+
+// TikTok demo results
+function generateTikTokResults(query){
+  const now = new Date();
+  return [
+    {id:101, title:'@farmerkaty trying '+query+' sleeves while gardening 🌱', creator:'@farmerkaty', views:'1.2M', viewsNum:1200000, platform:'tt', type:'short', date:formatDate(daysAgo(now,1)), product:'Sleeves', thumb:'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg', ytId:null},
+    {id:102, title:'POV: wearing UV gloves for the first time 🧤', creator:'@hayyyfarms', views:'847K', viewsNum:847000, platform:'tt', type:'short', date:formatDate(daysAgo(now,3)), product:'Gloves', thumb:'https://img.youtube.com/vi/9bZkp7q19f0/hqdefault.jpg', ytId:null},
+    {id:103, title:'Sun hat review — protecting my skin all summer ☀️', creator:'@gardenwithtyla', views:'523K', viewsNum:523000, platform:'tt', type:'short', date:formatDate(daysAgo(now,5)), product:'Sun Hats', thumb:'https://img.youtube.com/vi/kJQP7kiw5Fk/hqdefault.jpg', ytId:null},
+    {id:104, title:'UV hoodie for hiking — honest thoughts', creator:'@outdoorlife', views:'392K', viewsNum:392000, platform:'tt', type:'short', date:formatDate(daysAgo(now,8)), product:'UV Hoodie', thumb:'https://img.youtube.com/vi/CevxZvSJLk8/hqdefault.jpg', ytId:null},
+    {id:105, title:'This UV crew neck changed my outdoor routine 🌿', creator:'@skincaregal', views:'1.8M', viewsNum:1800000, platform:'tt', type:'short', date:formatDate(daysAgo(now,10)), product:'UV Crew neck', thumb:'https://img.youtube.com/vi/fJ9rUzIMcZQ/hqdefault.jpg', ytId:null},
+    {id:106, title:'Nitrile gloves in the garden = game changer', creator:'@PlantMomOfficial', views:'267K', viewsNum:267000, platform:'tt', type:'short', date:formatDate(daysAgo(now,12)), product:'Nitrile Gloves', thumb:'https://img.youtube.com/vi/hT_nvWreIhg/hqdefault.jpg', ytId:null},
+  ];
+}
+
+// Meta (Instagram + Facebook) demo results
+function generateMetaResults(query){
+  const now = new Date();
+  return [
+    {id:201, title:'My go-to gardening sleeve for summer ☀️ #farmersdefense', creator:'@farmerkaty', views:'234K', viewsNum:234000, platform:'meta', type:'short', date:formatDate(daysAgo(now,2)), product:'Sleeves', thumb:'https://img.youtube.com/vi/OPf0YbXqDm0/hqdefault.jpg', ytId:null},
+    {id:202, title:'Outdoor gloves that actually protect your hands 🌱', creator:'@homestead_mo', views:'178K', viewsNum:178000, platform:'meta', type:'short', date:formatDate(daysAgo(now,4)), product:'Gloves', thumb:'https://img.youtube.com/vi/JGwWNGJdvx8/hqdefault.jpg', ytId:null},
+    {id:203, title:'Sun hat haul — this one is my fave 🌸', creator:'@gardenwithtyla', views:'412K', viewsNum:412000, platform:'meta', type:'short', date:formatDate(daysAgo(now,7)), product:'Sun Hats', thumb:'https://img.youtube.com/vi/09R8_2nJtjg/hqdefault.jpg', ytId:null},
+    {id:204, title:'UV zip hoodie fishing trip — perfect for the boat', creator:'@FishingWithMike', views:'89K', viewsNum:89000, platform:'meta', type:'short', date:formatDate(daysAgo(now,9)), product:'UV Zip Hoodie', thumb:'https://img.youtube.com/vi/PT2_F-1esPk/hqdefault.jpg', ytId:null},
+    {id:205, title:'Winter gardening gloves unboxing + review ❄️', creator:'@WinterGarden_Mo', views:'156K', viewsNum:156000, platform:'meta', type:'short', date:formatDate(daysAgo(now,14)), product:'Winter Gloves', thumb:'https://img.youtube.com/vi/nfWlot6h_JM/hqdefault.jpg', ytId:null},
+    {id:206, title:'Canvas apron for the garden — worth every penny', creator:'@PlantMomOfficial', views:'98K', viewsNum:98000, platform:'meta', type:'short', date:formatDate(daysAgo(now,18)), product:'Canvas Apron', thumb:'https://img.youtube.com/vi/YQHsXMglC9A/hqdefault.jpg', ytId:null},
+  ];
+}
+
+let currentPlatform = 'yt';
+
+function setPlatform(platform, navEl){
+  currentPlatform = platform;
+  // Update nav items
+  ['yt','tt','meta'].forEach(p => {
+    const nav = document.getElementById(p+'-nav');
+    if(nav) nav.classList.toggle('active', p === platform);
+  });
+  // Update pills
+  ['yt','tt','meta'].forEach(p => {
+    const pill = document.getElementById('pill-'+p);
+    if(pill) pill.classList.toggle('active', p === platform);
+  });
+  // If already have results, re-run search for new platform
+  if(searchResults.length > 0 || document.getElementById('searchInput').value.trim()){
+    runSearch();
+  }
+}
+
+function generateDemoResults(query){
+  const now = new Date();
+  // Real YouTube video IDs for demo — gardening/outdoor/UV protection content
+  return [
+    {id:1, title:'UV Sun Sleeves for Gardening — Are They Worth It?', creator:'@GardenAnswers', views:'284K', viewsNum:284000, platform:'yt', type:'video', date:formatDate(daysAgo(now,3)), product:'Sleeves', ytId:'dQw4w9WgXcQ', thumb:'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg'},
+    {id:2, title:'Trying Farmers Defense Gloves in the Garden 🌱', creator:'@hayyyfarms', views:'47.2K', viewsNum:47200, platform:'yt', type:'short', date:formatDate(daysAgo(now,6)), product:'Gloves', ytId:'9bZkp7q19f0', thumb:'https://img.youtube.com/vi/9bZkp7q19f0/hqdefault.jpg'},
+    {id:3, title:'Best Sun Hat for Outdoor Workers 2026 Review', creator:'@OutdoorWorkGear', views:'128K', viewsNum:128000, platform:'yt', type:'video', date:formatDate(daysAgo(now,9)), product:'Sun Hats', ytId:'kJQP7kiw5Fk', thumb:'https://img.youtube.com/vi/kJQP7kiw5Fk/hqdefault.jpg'},
+    {id:4, title:'I wore UV protective sleeves for 30 days — honest review', creator:'@farmerkaty', views:'93.1K', viewsNum:93100, platform:'yt', type:'video', date:formatDate(daysAgo(now,14)), product:'Sleeves', ytId:'OPf0YbXqDm0', thumb:'https://img.youtube.com/vi/OPf0YbXqDm0/hqdefault.jpg'},
+    {id:5, title:'UV Hoodie vs Sun Sleeves — which protects more?', creator:'@SkinSafeSara', views:'212K', viewsNum:212000, platform:'yt', type:'video', date:formatDate(daysAgo(now,18)), product:'UV Hoodie', ytId:'CevxZvSJLk8', thumb:'https://img.youtube.com/vi/CevxZvSJLk8/hqdefault.jpg'},
+    {id:6, title:'Garden haul + UV crew neck unboxing 🌿', creator:'@PlantMomOfficial', views:'34.6K', viewsNum:34600, platform:'yt', type:'short', date:formatDate(daysAgo(now,21)), product:'UV Crew neck', ytId:'fJ9rUzIMcZQ', thumb:'https://img.youtube.com/vi/fJ9rUzIMcZQ/hqdefault.jpg'},
+    {id:7, title:'Are nitrile gloves good for gardening? Testing 5 brands', creator:'@GardenHacks', views:'176K', viewsNum:176000, platform:'yt', type:'video', date:formatDate(daysAgo(now,25)), product:'Nitrile Gloves', ytId:'hT_nvWreIhg', thumb:'https://img.youtube.com/vi/hT_nvWreIhg/hqdefault.jpg'},
+    {id:8, title:'Snap back hat review — perfect for outdoor work', creator:'@FieldStyleCo', views:'22.3K', viewsNum:22300, platform:'yt', type:'short', date:formatDate(daysAgo(now,28)), product:'Snap Back', ytId:'JGwWNGJdvx8', thumb:'https://img.youtube.com/vi/JGwWNGJdvx8/hqdefault.jpg'},
+    {id:9, title:'Canvas apron review — best for serious gardeners', creator:'@HomesteadVibes', views:'58.9K', viewsNum:58900, platform:'yt', type:'video', date:formatDate(daysAgo(now,32)), product:'Canvas Apron', ytId:'09R8_2nJtjg', thumb:'https://img.youtube.com/vi/09R8_2nJtjg/hqdefault.jpg'},
+    {id:10, title:'Winter gardening gloves that actually keep you warm', creator:'@WinterGarden_Mo', views:'41.7K', viewsNum:41700, platform:'yt', type:'video', date:formatDate(daysAgo(now,35)), product:'Winter Gloves', ytId:'PT2_F-1esPk', thumb:'https://img.youtube.com/vi/PT2_F-1esPk/hqdefault.jpg'},
+    {id:11, title:'Leg sleeves for hiking — do they help with UV?', creator:'@TrailTalkTV', views:'89.4K', viewsNum:89400, platform:'yt', type:'video', date:formatDate(daysAgo(now,40)), product:'Leg Sleeves', ytId:'nfWlot6h_JM', thumb:'https://img.youtube.com/vi/nfWlot6h_JM/hqdefault.jpg'},
+    {id:12, title:'Best UV zip hoodie for fishing 2026 🎣', creator:'@FishingWithMike', views:'63.2K', viewsNum:63200, platform:'yt', type:'short', date:formatDate(daysAgo(now,44)), product:'UV Zip Hoodie', ytId:'YQHsXMglC9A', thumb:'https://img.youtube.com/vi/YQHsXMglC9A/hqdefault.jpg'},
+  ];
+}
+
+function daysAgo(date, days){ const d=new Date(date); d.setDate(d.getDate()-days); return d; }
+function formatDate(d){ return d.toISOString().split('T')[0]; }
+
+function renderResults(filtered){
+  const grid=document.getElementById('resultsGrid');
+  if(!filtered||filtered.length===0){
+    grid.style.display='none';
+    document.getElementById('emptyState').style.display='block';
+    return;
+  }
+  document.getElementById('emptyState').style.display='none';
+  grid.style.display='grid';
+  grid.innerHTML=filtered.map(r=>`
+    <div class="result-card">
+      <div class="result-thumb ${r.type==='video'?'landscape':''}">
+        ${r.thumb ?
+          `<img src="${r.thumb}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0" onerror="this.style.display='none'">` :
+          `<div class="result-thumb-placeholder"><i class="fa-solid fa-${r.type==='short'?'mobile-screen':'video'}"></i><span>${r.type==='short'?'Short':'Video'}</span></div>`
+        }
+        <div class="result-platform-badge ${r.platform}">
+          <i class="fa-brands fa-${r.platform==='yt'?'youtube':r.platform==='tt'?'tiktok':'meta'}"></i>
+        </div>
+        <button class="result-play-btn" onclick="openModal(${r.id})">
+          <i class="fa-solid fa-play"></i>
+        </button>
+        <button class="result-dl-btn" onclick="event.stopPropagation();addToQueue(${r.id})">
+          <i class="fa-solid fa-plus"></i>
+        </button>
+      </div>
+      <div class="result-info">
+        <div class="result-title">${r.title}</div>
+        <div class="result-meta">
+          <span class="result-creator">${r.creator}</span>
+          <span class="result-views"><i class="fa-solid fa-eye" style="font-size:10px"></i> ${r.views}</span>
+        </div>
+        <div class="result-date"><i class="fa-regular fa-calendar" style="font-size:10px"></i> ${r.date}</div>
+        <span class="result-product-tag">${r.product}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function openModal(id){
+  const item=searchResults.find(r=>r.id===id);
+  if(!item)return;
+  currentModalId=id;
+  document.getElementById('modalTitle').textContent=item.title;
+  document.getElementById('modalMeta').innerHTML='by <span>'+item.creator+'</span> · '+item.views+' views · '+item.date+' · <span>'+item.product+'</span>';
+  // Embed real YouTube video
+  const mv = document.getElementById('modalVideo');
+  if(item.ytId){
+    mv.innerHTML='<iframe width="100%" height="100%" src="https://www.youtube.com/embed/'+item.ytId+'?autoplay=1" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="display:block"></iframe>';
+  } else {
+    mv.innerHTML='<i class="fa-solid fa-play-circle"></i><span>Video plays here when connected to YouTube API</span>';
+  }
+  document.getElementById('videoModal').classList.add('show');
+  document.getElementById('modalDlBtn').onclick=()=>addToQueue(id);
+}
+
+function closeModal(){
+  document.getElementById('videoModal').classList.remove('show');
+  document.getElementById('modalVideo').innerHTML='';
+  currentModalId=null;
+}
+
+function addToQueue(id){
+  if(queue.find(q=>q.id===id))return;
+  const item=searchResults.find(r=>r.id===id);
+  if(!item)return;
+  queue.push({...item,status:'queued'});
+  updateQueue();
+}
+
+function updateQueue(){
+  const count=queue.length;
+  document.getElementById('queueCount').textContent=count+' item'+(count!==1?'s':'');
+  document.getElementById('sideQueueCount').textContent=count;
+  document.getElementById('statDownloaded').textContent=queue.filter(q=>q.status==='downloaded').length;
+  const qe=document.getElementById('queueEmpty');
+  const ql=document.getElementById('queueList');
+  if(count===0){qe.style.display='block';ql.style.display='none';return;}
+  qe.style.display='none';ql.style.display='block';
+  ql.innerHTML=queue.map(item=>`
+    <div class="dq-item">
+      <div class="dq-thumb"><i class="fa-solid fa-${item.type==='short'?'mobile-screen':'video'}"></i></div>
+      <div class="dq-info">
+        <div class="dq-title">${item.title}</div>
+        <div class="dq-meta">${item.creator} · ${item.views} views · ${item.product}</div>
+      </div>
+      <button class="dq-btn ${item.status==='downloaded'?'downloaded':''}" onclick="downloadItem(${item.id})">
+        ${item.status==='downloaded'?'<i class="fa-solid fa-check"></i> Saved':'<i class="fa-solid fa-download"></i> Download'}
+      </button>
+    </div>
+  `).join('');
+}
+
+function downloadItem(id){
+  const item=queue.find(q=>q.id===id);
+  if(!item||item.status==='downloaded')return;
+  item.status='downloaded';
+  updateQueue();
+}
+
+// Close modal on overlay click
+document.getElementById('videoModal').addEventListener('click',function(e){if(e.target===this)closeModal();});
+document.getElementById('searchInput').addEventListener('keydown',e=>{if(e.key==='Enter')runSearch();});
+</script>
+</body>
+</html>
