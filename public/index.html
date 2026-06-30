@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FarmersHarvest — Find Your Content</title>
+<title>Farmers Defense Content</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -187,9 +187,9 @@ body { font-family: var(--sans); background: var(--cream); color: var(--text); m
 <div class="topbar">
   <div class="logo">
     <div class="logo-icon"><i class="fa-solid fa-seedling"></i></div>
-    FarmersHarvest
+    Farmers Defense Content
   </div>
-  <span class="topbar-sub">UGC Content Finder</span>
+  <span class="topbar-sub">UGC Discovery</span>
   <div class="topbar-right">
     <span class="tbadge">Farmers Defense</span>
     <span class="tbadge coming">Beta</span>
@@ -219,7 +219,7 @@ body { font-family: var(--sans); background: var(--cream); color: var(--text); m
 <div class="main">
 
   <div class="hero">
-    <div class="hero-eyebrow"><i class="fa-solid fa-seedling"></i> &nbsp;FarmersHarvest</div>
+    <div class="hero-eyebrow"><i class="fa-solid fa-seedling"></i> &nbsp;Farmers Defense Content</div>
     <div class="hero-title">Find every piece of content<br>about <span>Farmers Defense</span></div>
     <div class="hero-sub">Search hashtags, keywords, and creator handles across platforms. Preview inline and download UGC content in one place.</div>
     <div class="hero-search">
@@ -233,6 +233,19 @@ body { font-family: var(--sans); background: var(--cream); color: var(--text); m
       <div class="platform-pill yt active" id="pill-yt" onclick="setPlatform('yt',null)"><i class="fa-brands fa-youtube"></i> YouTube</div>
       <div class="platform-pill tt" id="pill-tt" onclick="setPlatform('tt',null)" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.7);border-color:rgba(255,255,255,0.2)"><i class="fa-brands fa-tiktok"></i> TikTok</div>
       <div class="platform-pill meta" id="pill-meta" onclick="setPlatform('meta',null)" style="background:rgba(74,158,255,0.1);color:#7ab8ff;border-color:rgba(74,158,255,0.2)"><i class="fa-brands fa-meta"></i> Meta</div>
+    </div>
+    <!-- TIKTOK HARVEST BUTTON -->
+    <div style="margin-top:1rem;background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.1);border-radius:var(--r);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-size:12px;font-weight:600;color:rgba(255,255,255,0.7);margin-bottom:2px"><i class="fa-brands fa-tiktok"></i> &nbsp;TikTok Auto-Harvest</div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.35)" id="harvestStatus">Press to search TikTok for new Farmers Defense content</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="font-size:11px;color:rgba(200,160,53,0.7)" id="harvestCounter">5 searches remaining today</div>
+        <button id="harvestBtn" onclick="triggerTikTokHarvest()" style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:var(--r);background:var(--harvest);color:var(--soil);font-size:12px;font-weight:600;border:none;cursor:pointer">
+          <i class="fa-solid fa-rotate"></i> Harvest TikTok
+        </button>
+      </div>
     </div>
   </div>
 
@@ -375,7 +388,7 @@ function applyFilters(){
   renderResults(filtered);
 }
 
-async function runSearch(){
+function runSearch(){
   const query = document.getElementById('searchInput').value.trim();
   if(!query) return;
   document.getElementById('emptyState').style.display='none';
@@ -383,37 +396,20 @@ async function runSearch(){
   const btn = document.querySelector('.btn-harvest');
   btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Searching...';
   btn.disabled=true;
-
-  try {
+  setTimeout(()=>{
+    btn.innerHTML='<i class="fa-solid fa-magnifying-glass"></i> Search';
+    btn.disabled=false;
     if(currentPlatform === 'tt'){
       searchResults = generateTikTokResults(query);
     } else if(currentPlatform === 'meta'){
       searchResults = generateMetaResults(query);
     } else {
-      // Real YouTube API call
-      const order = activeFilter === 'popular' ? 'viewCount' : activeFilter === 'recent' ? 'date' : 'relevance';
-      const df = document.getElementById('dateFrom').value;
-      const dt = document.getElementById('dateTo').value;
-      let url = `/api/search?query=${encodeURIComponent(query)}&maxResults=12&order=${order}`;
-      if(df) url += `&publishedAfter=${df}`;
-      if(dt) url += `&publishedBefore=${dt}`;
-      const r = await fetch(url);
-      const d = await r.json();
-      if(d.ok){ searchResults = d.results; }
-      else { throw new Error(d.error); }
+      searchResults = generateDemoResults(query);
     }
-    document.getElementById('statResults').textContent = searchResults.length;
-    document.getElementById('resultsCount').textContent = searchResults.length + ' results';
+    document.getElementById('statResults').textContent=searchResults.length;
+    document.getElementById('resultsCount').textContent=searchResults.length+' results';
     applyFilters();
-  } catch(err) {
-    console.error(err);
-    document.getElementById('emptyState').style.display='block';
-    document.getElementById('emptyState').querySelector('.empty-title').textContent = 'Search failed';
-    document.getElementById('emptyState').querySelector('.empty-sub').textContent = err.message;
-  }
-
-  btn.innerHTML='<i class="fa-solid fa-magnifying-glass"></i> Search';
-  btn.disabled=false;
+  }, 1500);
 }
 
 // TikTok demo results
@@ -457,9 +453,7 @@ function setPlatform(platform, navEl){
     if(pill) pill.classList.toggle('active', p === platform);
   });
   // If already have results, re-run search for new platform
-  if(searchResults.length > 0 || document.getElementById('searchInput').value.trim()){
-    runSearch();
-  }
+  if(platform==='tt'){ loadTikTokResults(); } else if(searchResults.length>0||document.getElementById('searchInput').value.trim()){ runSearch(); }
 }
 
 function generateDemoResults(query){
@@ -583,6 +577,64 @@ function downloadItem(id){
   item.status='downloaded';
   updateQueue();
 }
+
+// TIKTOK HARVEST
+let harvestUsesToday = parseInt(localStorage.getItem('harvestUses_'+new Date().toDateString()) || '0');
+const MAX_HARVESTS = 5;
+
+function updateHarvestCounter(){
+  const remaining = MAX_HARVESTS - harvestUsesToday;
+  const counter = document.getElementById('harvestCounter');
+  if(counter){ counter.textContent = remaining+' search'+(remaining!==1?'es':'')+' remaining today'; counter.style.color = remaining<=1?'rgba(255,100,100,0.8)':'rgba(200,160,53,0.7)'; }
+  const btn = document.getElementById('harvestBtn');
+  if(btn) btn.disabled = remaining<=0;
+}
+
+async function triggerTikTokHarvest(){
+  if(harvestUsesToday>=MAX_HARVESTS){ alert('You have used all 5 TikTok searches for today. Resets at midnight!'); return; }
+  const confirmed = confirm('This will search TikTok for new Farmers Defense content.\n\nYou have '+(MAX_HARVESTS-harvestUsesToday)+' searches remaining today.\n\nNote: Using this too many times may trigger TikTok bot detection. Maximum 5 per day recommended.\n\nContinue?');
+  if(!confirmed) return;
+  harvestUsesToday++;
+  localStorage.setItem('harvestUses_'+new Date().toDateString(), harvestUsesToday);
+  updateHarvestCounter();
+  const btn=document.getElementById('harvestBtn');
+  const status=document.getElementById('harvestStatus');
+  btn.disabled=true;
+  btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Harvesting...';
+  status.textContent='Triggering TikTok search via GitHub Actions...';
+  try{
+    const r=await fetch('/api/harvest-tiktok',{method:'POST'});
+    const d=await r.json();
+    if(d.ok){ status.textContent='✓ Harvest triggered! Results appear in 2-3 minutes. Switch to TikTok tab to see them.'; btn.innerHTML='<i class="fa-solid fa-check"></i> Triggered!'; btn.style.background='#4a7c3f'; setTimeout(()=>{if(currentPlatform==='tt')loadTikTokResults();},180000); }
+    else throw new Error(d.error);
+  }catch(err){
+    status.textContent='Error: '+err.message;
+    btn.innerHTML='<i class="fa-solid fa-rotate"></i> Harvest TikTok';
+    btn.disabled=false;
+    harvestUsesToday--;
+    localStorage.setItem('harvestUses_'+new Date().toDateString(),harvestUsesToday);
+    updateHarvestCounter();
+  }
+}
+
+async function loadTikTokResults(){
+  try{
+    const r=await fetch('/tiktok-results.json?t='+Date.now());
+    if(!r.ok) throw new Error('No results yet');
+    const data=await r.json();
+    searchResults=data.slice(0,50).map(item=>({...item,views:item.views||'N/A',thumb:null}));
+    document.getElementById('statResults').textContent=searchResults.length;
+    document.getElementById('resultsCount').textContent=searchResults.length+' results';
+    applyFilters();
+  }catch(err){
+    document.getElementById('emptyState').style.display='block';
+    document.getElementById('emptyState').querySelector('.empty-title').textContent='No TikTok results yet';
+    document.getElementById('emptyState').querySelector('.empty-sub').textContent='Press Harvest TikTok to search for content. Results appear here after 2-3 minutes.';
+    document.getElementById('resultsGrid').style.display='none';
+  }
+}
+
+updateHarvestCounter();
 
 // Close modal on overlay click
 document.getElementById('videoModal').addEventListener('click',function(e){if(e.target===this)closeModal();});
