@@ -613,7 +613,7 @@ async function triggerHarvestAll(){
   const btn = document.getElementById('harvestBtn');
   const status = document.getElementById('harvestStatus');
 
-  const confirmed = confirm('This will search TikTok, Instagram, and Facebook for new Farmers Defense content.\n\nThis uses paid search credits and can only be run once every 7 days to stay within budget. The search itself takes a few minutes to complete.\n\nContinue?');
+  const confirmed = confirm('This will search TikTok, Instagram, and Facebook for new Farmers Defense content.\n\nThis uses paid search credits (currently a tiny fraction of a cent per run). The search itself takes a few minutes to complete.\n\nContinue?');
   if(!confirmed) return;
 
   btn.disabled = true;

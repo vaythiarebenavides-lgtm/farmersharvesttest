@@ -135,7 +135,10 @@ app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 // ── APIFY MULTI-PLATFORM HARVEST ──
 const APIFY_TOKEN = process.env.APIFY_TOKEN;
-const COOLDOWN_DAYS = 7;
+// Set to 0 while testing/tuning the search configuration so you can run repeatedly
+// without waiting. Once results look good, set HARVEST_COOLDOWN_DAYS=7 in Render's
+// environment variables (no code change needed) to re-enable the budget-safe limit.
+const COOLDOWN_DAYS = parseInt(process.env.HARVEST_COOLDOWN_DAYS || '0');
 const COOLDOWN_MS = COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
 
 // Server-side cooldown tracking — stored in the sheet itself so it persists across
