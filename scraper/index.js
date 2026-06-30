@@ -1,6 +1,7 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
+const { google } = require('googleapis');
 const config = require('./config');
 
 // ── LOGGING ──
@@ -21,32 +22,71 @@ function randomDelay(range) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// ── LOAD EXISTING RESULTS ──
-function loadExisting() {
-  try {
-    const filePath = path.resolve(config.resultsFile);
-    if (fs.existsSync(filePath)) {
-      const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-      log('STORAGE', `Loaded ${data.length} existing results`);
-      return data;
-    }
-  } catch (err) {
-    logError('STORAGE', 'Could not load existing results', err);
-  }
-  return [];
+// ── GOOGLE SHEETS AUTH ──
+function getSheetsClient() {
+  const creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
+  const auth = new google.auth.GoogleAuth({
+    credentials: creds,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+  return google.sheets({ version: 'v4', auth });
 }
 
-// ── SAVE RESULTS ──
-function saveResults(results) {
-  try {
-    const filePath = path.resolve(config.resultsFile);
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(results, null, 2));
-    log('STORAGE', `Saved ${results.length} total results to ${filePath}`);
-  } catch (err) {
-    logError('STORAGE', 'Could not save results', err);
+const SHEET_ID = process.env.FARMERSHARVEST_SHEET_ID;
+const SHEET_NAME = 'Sheet1';
+
+// ── ENSURE HEADERS ──
+async function ensureHeaders(sheets) {
+  const r = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `'${SHEET_NAME}'!A1:H1` });
+  const row = r.data.values?.[0];
+  if (!row || row.length === 0 || row[0] !== 'Platform') {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `'${SHEET_NAME}'!A1:H1`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [['Platform', 'Creator', 'Title/Caption', 'Link', 'Views', 'Date Posted', 'Date Discovered', 'Usage Rights']] },
+    });
+    log('SHEETS', 'Headers created');
   }
+}
+
+// ── LOAD EXISTING LINKS FROM SHEET (for deduplication) ──
+async function loadExistingLinks(sheets) {
+  try {
+    const r = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `'${SHEET_NAME}'!D:D` });
+    const links = (r.data.values || []).map(row => row[0]).filter(Boolean);
+    log('SHEETS', `Loaded ${links.length} existing links from sheet`);
+    return new Set(links);
+  } catch (err) {
+    logError('SHEETS', 'Could not load existing links', err);
+    return new Set();
+  }
+}
+
+// ── APPEND NEW ROWS TO SHEET ──
+async function appendToSheet(sheets, results) {
+  if (results.length === 0) {
+    log('SHEETS', 'No new results to add');
+    return;
+  }
+  const rows = results.map(r => [
+    'TikTok',
+    r.creator || '',
+    r.title || '',
+    r.url || '',
+    r.views || 'N/A',
+    r.date || '',
+    new Date().toISOString().split('T')[0],
+    'FALSE',
+  ]);
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SHEET_ID,
+    range: `'${SHEET_NAME}'!A:H`,
+    valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: rows },
+  });
+  log('SHEETS', `Appended ${rows.length} new rows to sheet`);
 }
 
 // ── SAVE SCREENSHOT ON ERROR ──
@@ -144,10 +184,11 @@ async function scrapeKeyword(page, keyword, existingUrls) {
       results.push({
         id: videoId || Date.now().toString(),
         url: link.url,
+        title: link.text || keyword + ' content',
         creator: username,
-        caption: link.text || keyword + ' content',
         date: new Date().toISOString().split('T')[0],
         views: 'N/A',
+        viewsNum: 0,
         platform: 'tt',
         keyword: keyword,
         type: 'short',
@@ -170,8 +211,17 @@ async function main() {
   log('START', '🌱 FarmersHarvest TikTok Scraper starting...');
   log('START', `Keywords: ${config.keywords.join(', ')}`);
 
-  const existing = loadExisting();
-  const existingUrls = new Set(existing.map(r => r.url));
+  let existingUrls = new Set();
+  let sheets;
+
+  try {
+    sheets = getSheetsClient();
+    await ensureHeaders(sheets);
+    existingUrls = await loadExistingLinks(sheets);
+  } catch (err) {
+    logError('SHEETS', 'Could not connect to Google Sheets — falling back to local file', err);
+  }
+
   let allNew = [];
 
   let browser;
@@ -226,11 +276,16 @@ async function main() {
     if (browser) await browser.close().catch(() => {});
   }
 
-  // Save combined results
-  const combined = [...existing, ...allNew];
-  saveResults(combined);
+  // Write new results to Google Sheets (deduplication already applied during scraping)
+  if (sheets) {
+    try {
+      await appendToSheet(sheets, allNew);
+    } catch (err) {
+      logError('SHEETS', 'Failed to write to sheet', err);
+    }
+  }
 
-  log('DONE', `✅ Scraper finished. Found ${allNew.length} new results. Total: ${combined.length}`);
+  log('DONE', `✅ Scraper finished. Found ${allNew.length} new results.`);
 }
 
 main().catch(err => {
