@@ -1,0 +1,49 @@
+name: TikTok Scraper
+
+on:
+  workflow_dispatch:
+    inputs:
+      keywords:
+        description: 'Keywords to search (comma separated)'
+        required: false
+        default: 'farmersdefense,farmers defense,#farmersdefense,#farmersdefensegloves'
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          cd scraper
+          npm install
+
+      - name: Install Playwright browsers
+        run: |
+          cd scraper
+          npx playwright install chromium --with-deps
+
+      - name: Run TikTok scraper
+        run: |
+          cd scraper
+          node index.js
+        env:
+          KEYWORDS: ${{ github.event.inputs.keywords }}
+          RESULTS_FILE: '../public/tiktok-results.json'
+
+      - name: Commit results
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add public/tiktok-results.json
+          git diff --staged --quiet || git commit -m "Update TikTok results"
+          git push
