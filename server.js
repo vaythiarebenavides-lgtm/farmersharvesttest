@@ -296,6 +296,39 @@ function extractHandleFromUrl(url) {
   }
 }
 
+// ── RELEVANCE FILTER ──
+// Simple keyword-based check to cut out content that matched our broad search terms
+// coincidentally (e.g. news stories about farmers fighting bandits, bodybuilding videos)
+// without needing an AI API call. Not perfect — genuine edge cases can still slip through
+// either direction — but removes the most obvious noise we saw in the first real run.
+const RELEVANT_PHRASES = [
+  'farmers defense', 'farmersdefense', "farmer's defense", 'farmer\u2019s defense',
+];
+const PRODUCT_WORDS = [
+  'sleeve', 'glove', 'sun hat', 'upf', 'gardening', 'garden', 'apron', 'hoodie',
+  'snap back', 'leg sleeve',
+];
+
+function isLikelyRelevant(text) {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  // Strong signal: the brand name itself (with or without space/apostrophe) appears
+  if (RELEVANT_PHRASES.some(phrase => lower.includes(phrase))) return true;
+  // Weaker signal: mentions a specific product word AND the word "defense" together —
+  // catches creators tagging @farmersdefense without spelling out the full brand name
+  // in the caption text itself
+  if (lower.includes('defense') && PRODUCT_WORDS.some(w => lower.includes(w))) return true;
+  return false;
+}
+
+function filterRelevant(rows, label) {
+  const before = rows.length;
+  const filtered = rows.filter(r => isLikelyRelevant(r.title) || isLikelyRelevant(r.creator));
+  const removed = before - filtered.length;
+  if (removed > 0) console.log(`[${label}] Relevance filter removed ${removed} of ${before} results`);
+  return filtered;
+}
+
 // ── MAIN HARVEST ENDPOINT ──
 // In-memory job tracker. We only ever run one harvest job at a time (enforced by the
 // cooldown anyway), so a single module-level variable is sufficient — no database needed
@@ -355,9 +388,14 @@ async function runFullHarvest(sheets) {
   // Run all three platforms. Each is wrapped so a failure in one doesn't stop the others.
   const [tiktokRun, instagramRun, googleRun] = await Promise.all([
     runApifyActor('clockworks~tiktok-scraper', {
-      searchQueries: ['farmersdefense'],
-      searchSection: '/video',
-      resultsPerPage: 50,
+      // Searching the two confirmed hashtags directly (rather than the bare word
+      // "farmersdefense") cuts out a lot of the unrelated noise we saw last run —
+      // things like news stories about farmers fighting bandits don't use these
+      // specific hashtags, even though they contain the word "farmers" or "defense".
+      hashtags: ['farmersdefense', 'farmersdefensegloves'],
+      resultsPerPage: 100, // raised from 50 — our actual cost last run was $0.01,
+                           // nowhere near our $1.65/month budget share, so there's
+                           // real room to pull more volume per run
       shouldDownloadVideos: false,
       shouldDownloadCovers: false,
       shouldDownloadAvatars: false,
@@ -371,17 +409,22 @@ async function runFullHarvest(sheets) {
     }, 'TikTok'),
 
     runApifyActor('apify~instagram-scraper', {
+      // searchType only supports Hashtag/Profile/Place (confirmed directly on Apify's
+      // input form) — no general/broad search exists for this Actor. Given that real
+      // constraint, the best lever we have is searching multiple relevant hashtags
+      // rather than just one, similar to the TikTok approach.
       search: 'farmersdefense',
       searchType: 'hashtag',
-      searchLimit: 70,
-      resultsType: 'reels',
-      resultsLimit: 70,
+      searchLimit: 100,
+      resultsType: 'reels', // confirmed value from your saved config — kept as is
+      resultsLimit: 100,
       // directUrls intentionally omitted — search-based input only
     }, 'Instagram'),
 
     runApifyActor('apify~google-search-scraper', {
-      queries: 'site:facebook.com "farmers defense" reels\nsite:instagram.com "farmers defense"',
-      maxPagesPerQuery: 1,
+      queries: 'site:facebook.com "farmers defense" reels\nsite:instagram.com "farmers defense"\nsite:facebook.com "farmersdefense"\nsite:instagram.com "farmersdefense"',
+      maxPagesPerQuery: 2, // raised from 1 — more pages per query means more total
+                           // links found; doubled the number of query variations too
       mobileResults: false,
       includeUnfilteredResults: false,
       forceExactMatch: false,
@@ -393,7 +436,8 @@ async function runFullHarvest(sheets) {
   // TikTok
   platformResults.tiktok = { ok: tiktokRun.ok, error: tiktokRun.error, count: 0 };
   if (tiktokRun.ok) {
-    const rows = parseTikTokItems(tiktokRun.items);
+    const rawRows = parseTikTokItems(tiktokRun.items);
+    const rows = filterRelevant(rawRows, 'TikTok');
     allRows.push(...rows);
     platformResults.tiktok.count = rows.length;
   }
@@ -401,15 +445,18 @@ async function runFullHarvest(sheets) {
   // Instagram
   platformResults.instagram = { ok: instagramRun.ok, error: instagramRun.error, count: 0 };
   if (instagramRun.ok) {
-    const rows = parseInstagramItems(instagramRun.items);
+    const rawRows = parseInstagramItems(instagramRun.items);
+    const rows = filterRelevant(rawRows, 'Instagram');
     allRows.push(...rows);
     platformResults.instagram.count = rows.length;
   }
 
-  // Google Search (Facebook + bonus Instagram coverage)
+  // Google Search (Facebook + bonus Instagram coverage) — search queries already require
+  // "farmers defense" explicitly, so this is mostly a safety net rather than the primary filter
   platformResults.googleSearch = { ok: googleRun.ok, error: googleRun.error, count: 0 };
   if (googleRun.ok) {
-    const rows = parseGoogleSearchItems(googleRun.items);
+    const rawRows = parseGoogleSearchItems(googleRun.items);
+    const rows = filterRelevant(rawRows, 'GoogleSearch');
     allRows.push(...rows);
     platformResults.googleSearch.count = rows.length;
   }

@@ -107,6 +107,7 @@ body { font-family: var(--sans); background: var(--cream); color: var(--text); m
 .filter-btn.active { background: var(--harvest); color: var(--soil); border-color: var(--harvest); font-weight: 600; }
 .filter-divider { width: 1px; height: 24px; background: var(--mist); margin: 0 4px; }
 .filter-select { padding: 6px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; border: 1px solid var(--mist); background: #fff; color: var(--text-mid); cursor: pointer; font-family: var(--sans); outline: none; }
+.filter-select:disabled { opacity: 0.4; cursor: not-allowed; background: var(--parchment); }
 .date-input { padding: 5px 10px; border-radius: 20px; font-size: 12px; border: 1px solid var(--mist); background: #fff; color: var(--text-mid); font-family: var(--sans); outline: none; cursor: pointer; }
 .date-label { font-size: 11px; color: var(--text-faint); }
 
@@ -345,11 +346,19 @@ function setPlatform(platform, navEl){
     const tab = document.getElementById('tab-'+p);
     if(tab) tab.classList.toggle('active', p === platform);
   });
-  if(platform === 'tt'){
-    loadTikTokResults();
+
+  // Product filter only applies to YouTube results — disable it visually on sheet-backed
+  // tabs rather than letting it silently filter out everything with no explanation.
+  const productFilterEl = document.getElementById('productFilter');
+  const isSheetBacked = platform === 'tt' || platform === 'ig' || platform === 'fb' || platform === 'all';
+  productFilterEl.disabled = isSheetBacked;
+  productFilterEl.title = isSheetBacked ? 'Product filter only applies to YouTube results' : '';
+
+  if(isSheetBacked){
+    // TikTok, Instagram, and Facebook all live in the same sheet now — load from there.
+    loadSheetResults();
   } else if(searchResults.length > 0 || document.getElementById('searchInput').value.trim()){
-    if(platform !== 'all') runSearch();
-    else applyFilters();
+    runSearch();
   }
 }
 
@@ -366,8 +375,12 @@ function applyFilters(){
   if(activeFilter === 'rights') filtered = filtered.filter(r => usageRights[r.id]);
   else if(activeFilter === 'popular') filtered = [...filtered].sort((a,b) => (b.viewsNum||0) - (a.viewsNum||0));
   else if(activeFilter === 'recent') filtered = [...filtered].sort((a,b) => new Date(b.date) - new Date(a.date));
+  // Sheet-backed platforms (TikTok/Instagram/Facebook/All) don't have product tags —
+  // only YouTube results do. Skip product filtering entirely for those rather than
+  // letting it silently filter everything out with no explanation.
+  const sheetBackedPlatform = currentPlatform === 'tt' || currentPlatform === 'ig' || currentPlatform === 'fb' || currentPlatform === 'all';
   const prod = document.getElementById('productFilter').value;
-  if(prod) filtered = filtered.filter(r => r.product === prod);
+  if(prod && !sheetBackedPlatform) filtered = filtered.filter(r => r.product === prod);
   const df = document.getElementById('dateFrom').value;
   const dt = document.getElementById('dateTo').value;
   if(df) filtered = filtered.filter(r => new Date(r.date) >= new Date(df));
@@ -399,11 +412,12 @@ async function runSearch(){
   btn.disabled=true;
 
   try {
-    if(currentPlatform === 'tt'){
-      await loadTikTokResults();
-    } else if(currentPlatform === 'ig' || currentPlatform === 'fb'){
-      searchResults = generateMetaResults(query, currentPlatform);
-      finishSearch();
+    if(currentPlatform === 'tt' || currentPlatform === 'ig' || currentPlatform === 'fb' || currentPlatform === 'all'){
+      // These platforms are read from the Google Sheet, not searched live — the sheet
+      // only updates when "Search All Platforms" is run (subject to its 7-day cooldown).
+      // Typing in the search box and hitting Search on these tabs just re-reads the
+      // current sheet contents rather than triggering a new live search.
+      await loadSheetResults();
     } else {
       const order = activeFilter==='popular'?'viewCount':activeFilter==='recent'?'date':'relevance';
       const df = document.getElementById('dateFrom').value;
@@ -433,23 +447,6 @@ function finishSearch(){
   applyFilters();
 }
 
-function generateMetaResults(query, platform){
-  const now = new Date();
-  const igData = [
-    {id:'ig1', title:'My go-to gardening sleeve for summer ☀️ #farmersdefense', creator:'@farmerkaty', views:'234K', viewsNum:234000, date:formatDate(daysAgo(now,2)), product:'Sleeves'},
-    {id:'ig2', title:'Sun hat haul — this one is my fave 🌸', creator:'@gardenwithtyla', views:'412K', viewsNum:412000, date:formatDate(daysAgo(now,7)), product:'Sun Hats'},
-    {id:'ig3', title:'UV crew neck for hiking season', creator:'@PlantMomOfficial', views:'89K', viewsNum:89000, date:formatDate(daysAgo(now,11)), product:'UV Crew neck'},
-  ];
-  const fbData = [
-    {id:'fb1', title:'Outdoor gloves that actually protect your hands', creator:'Homestead Living', views:'18K', viewsNum:18000, date:formatDate(daysAgo(now,4)), product:'Gloves'},
-    {id:'fb2', title:'Winter gardening gloves review', creator:'Garden Folks Co', views:'9.2K', viewsNum:9200, date:formatDate(daysAgo(now,9)), product:'Winter Gloves'},
-  ];
-  const data = platform === 'ig' ? igData : fbData;
-  return data.map(d => ({...d, platform, type:'short', url:'#'}));
-}
-
-function daysAgo(date, days){ const d=new Date(date); d.setDate(d.getDate()-days); return d; }
-function formatDate(d){ return d.toISOString().split('T')[0]; }
 function parseViews(viewStr){
   if(!viewStr || viewStr === 'N/A') return 0;
   const s = viewStr.toString().toUpperCase();
@@ -681,8 +678,11 @@ async function pollHarvestJob(){
       if(res.platforms?.googleSearch) parts.push('Facebook/IG search: ' + (res.platforms.googleSearch.ok ? res.platforms.googleSearch.count + ' found' : 'failed'));
       status.textContent = '✓ Done! Added ' + res.added + ' new item' + (res.added !== 1 ? 's' : '') + ' to the sheet. (' + parts.join(' · ') + ')';
 
-      // Refresh whichever platform tab is currently active so new results show immediately
-      if(currentPlatform === 'tt') loadTikTokResults();
+      // Refresh whichever platform tab is currently active so new results show immediately.
+      // TikTok, Instagram, Facebook, and "All" are all backed by the sheet now.
+      if(currentPlatform === 'tt' || currentPlatform === 'ig' || currentPlatform === 'fb' || currentPlatform === 'all'){
+        loadSheetResults();
+      }
     } else if(job.status === 'error'){
       status.textContent = 'Harvest failed: ' + (job.error || 'Unknown error');
     }
@@ -698,33 +698,53 @@ async function pollHarvestJob(){
 // Check real cooldown status on page load
 refreshHarvestStatus();
 
-async function loadTikTokResults(){
+// Maps the sheet's actual Platform column text to our internal short codes used
+// throughout the UI (tab IDs, filter logic, badge icons, etc.)
+function platformTextToCode(platformText){
+  const p = (platformText || '').toLowerCase();
+  if(p === 'tiktok') return 'tt';
+  if(p === 'instagram') return 'ig';
+  if(p === 'facebook') return 'fb';
+  return 'unknown';
+}
+
+// Loads ALL rows from the sheet (TikTok + Instagram + Facebook together), tagging each
+// with its real platform from the sheet's Platform column rather than assuming one
+// platform for every row — this was the bug that made Instagram/Facebook tabs show
+// stale hardcoded demo data instead of the genuinely scraped sheet content.
+async function loadSheetResults(){
   try{
-    const r=await fetch('/api/sheet-data?t='+Date.now());
-    const d=await r.json();
+    const r = await fetch('/api/sheet-data?t=' + Date.now());
+    const d = await r.json();
     if(!d.ok) throw new Error(d.error || 'No results yet');
-    searchResults = d.data.map(item => ({
-      id: 'tt-row-' + item.rowIndex,
-      rowIndex: item.rowIndex,
-      title: item.title,
-      creator: item.creator,
-      url: item.url,
-      views: item.views || 'N/A',
-      viewsNum: parseViews(item.views),
-      date: item.date,
-      platform: 'tt',
-      type: 'short',
-      thumb: null,
-    }));
+
+    searchResults = d.data.map(item => {
+      const platformCode = platformTextToCode(item.platform);
+      return {
+        id: 'row-' + item.rowIndex,
+        rowIndex: item.rowIndex,
+        title: item.title,
+        creator: item.creator,
+        url: item.url,
+        views: item.views || 'N/A',
+        viewsNum: parseViews(item.views),
+        date: item.date,
+        platform: platformCode,
+        type: 'short',
+        thumb: null,
+      };
+    });
+
     // Sync usage rights from sheet into local state too
     d.data.forEach(item => {
-      if(item.usageRights) usageRights['tt-row-' + item.rowIndex] = true;
+      if(item.usageRights) usageRights['row-' + item.rowIndex] = true;
     });
+
     finishSearch();
   }catch(err){
     searchResults = [];
     document.getElementById('emptyState').style.display='block';
-    document.getElementById('emptyState').querySelector('.empty-title').textContent='No TikTok results yet';
+    document.getElementById('emptyState').querySelector('.empty-title').textContent='No results yet';
     document.getElementById('emptyState').querySelector('.empty-sub').textContent='Press "Search All Platforms" above to search for content. This can take a few minutes to complete.';
     document.getElementById('resultsGrid').style.display='none';
     updateCounts();
