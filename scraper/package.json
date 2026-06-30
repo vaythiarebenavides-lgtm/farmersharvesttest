@@ -1,9 +1,0 @@
-{
-  "name": "tiktok-scraper",
-  "version": "1.0.0",
-  "main": "index.js",
-  "dependencies": {
-    "playwright": "^1.40.0",
-    "googleapis": "^128.0.0"
-  }
-}
