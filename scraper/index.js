@@ -90,18 +90,22 @@ async function appendToSheet(sheets, results) {
 }
 
 // ── SAVE SCREENSHOT ON ERROR ──
-async function saveErrorScreenshot(page, keyword, stage) {
+async function saveDebugSnapshot(page, keyword, stage) {
   try {
-    const dir = path.resolve('./error-screenshots');
+    const dir = path.resolve('./debug-snapshots');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const filename = `error-${stage}-${keyword.replace(/[^a-z0-9]/gi, '_')}-${Date.now()}`;
-    await page.screenshot({ path: `${dir}/${filename}.png` });
-    fs.writeFileSync(`${dir}/${filename}.html`, await page.content());
-    log('DEBUG', `Saved error screenshot: ${filename}`);
+    const filename = `${stage}-${keyword.replace(/[^a-z0-9]/gi, '_')}-${Date.now()}`;
+    await page.screenshot({ path: `${dir}/${filename}.png`, fullPage: false });
+    const html = await page.content();
+    fs.writeFileSync(`${dir}/${filename}.html`, html);
+    log('DEBUG', `Saved snapshot: ${filename} (HTML length: ${html.length} chars)`);
   } catch (e) {
-    logError('DEBUG', 'Could not save error screenshot', e);
+    logError('DEBUG', 'Could not save debug snapshot', e);
   }
 }
+
+// Keep old name as alias for any remaining references
+const saveErrorScreenshot = saveDebugSnapshot;
 
 // ── PARSE DATE ──
 function parseDate(dateStr) {
@@ -123,11 +127,26 @@ async function scrapeKeyword(page, keyword, existingUrls) {
     const searchUrl = `https://www.tiktok.com/search?q=${encodeURIComponent(keyword)}`;
     log('NAVIGATE', `Going to: ${searchUrl}`);
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    // Give TikTok's JS time to render search results — this is a heavily client-rendered page
+    try {
+      await page.waitForSelector('a[href*="/video/"]', { timeout: 8000 });
+      log('NAVIGATE', 'Video links appeared in DOM');
+    } catch (e) {
+      log('NAVIGATE', 'Video links did not appear within 8s — page may have served a fallback/error state');
+    }
     await randomDelay(config.delays.pageLoad);
 
     // Check if page loaded
     const title = await page.title();
     log('NAVIGATE', `Page title: ${title}`);
+
+    // Detect TikTok's "something went wrong" error state early
+    const bodyText = await page.evaluate(() => document.body.innerText.slice(0, 300));
+    if (/something went wrong|sorry, something/i.test(bodyText)) {
+      log('NAVIGATE', `⚠️ TikTok served an error page for this search. Body preview: "${bodyText.slice(0, 150)}"`);
+    } else {
+      log('NAVIGATE', `Body preview: "${bodyText.slice(0, 150)}"`);
+    }
 
     // Scroll to load more results
     log('SCROLL', 'Scrolling through results...');
@@ -141,6 +160,9 @@ async function scrapeKeyword(page, keyword, existingUrls) {
     log('PARSE', 'Extracting video data...');
     let links = [];
 
+    // ALWAYS save a debug screenshot + HTML dump for this keyword so we can see exactly what TikTok served us
+    await saveDebugSnapshot(page, keyword, 'after-scroll');
+
     // Try primary selector
     try {
       links = await page.$$eval(config.selectors.videoLinks, els =>
@@ -151,19 +173,36 @@ async function scrapeKeyword(page, keyword, existingUrls) {
       );
       log('PARSE', `Found ${links.length} links with primary selector`);
     } catch (err) {
-      logError('PARSE', 'Primary selector failed, trying fallbacks', err);
-      // Try fallback selectors
+      logError('PARSE', 'Primary selector failed', err);
+    }
+
+    // If primary selector found nothing, try every fallback selector
+    if (links.length === 0) {
+      log('PARSE', 'Primary selector found 0 — trying fallbacks...');
       for (const fallback of config.fallbackSelectors.videoLinks) {
         try {
-          links = await page.$$eval(fallback, els =>
+          const found = await page.$$eval(fallback, els =>
             els.map(el => ({ url: el.href, text: el.textContent?.trim() || '' }))
                .filter(l => l.url && l.url.includes('tiktok.com'))
           );
-          if (links.length > 0) {
-            log('PARSE', `Fallback selector "${fallback}" found ${links.length} links`);
-            break;
-          }
-        } catch (e) {}
+          log('PARSE', `Fallback "${fallback}" found ${found.length} links`);
+          if (found.length > 0) { links = found; break; }
+        } catch (e) {
+          logError('PARSE', `Fallback "${fallback}" threw an error`, e);
+        }
+      }
+    }
+
+    // Last resort — grab EVERY anchor tag on the page and filter for video URLs in JS
+    if (links.length === 0) {
+      log('PARSE', 'All selectors found 0 — grabbing every anchor tag as last resort...');
+      try {
+        const allLinks = await page.$$eval('a', els => els.map(el => ({ url: el.href, text: el.textContent?.trim() || '' })));
+        log('PARSE', `Page has ${allLinks.length} total anchor tags`);
+        links = allLinks.filter(l => l.url && /\/video\/\d+/.test(l.url));
+        log('PARSE', `Of those, ${links.length} match the /video/ID pattern`);
+      } catch (e) {
+        logError('PARSE', 'Even grabbing all anchors failed', e);
       }
     }
 
@@ -237,14 +276,27 @@ async function main() {
         '--no-first-run',
         '--no-zygote',
         '--disable-gpu',
-        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        '--disable-blink-features=AutomationControlled',
       ]
     });
 
     const context = await browser.newContext({
-      viewport: { width: 1280, height: 800 },
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      viewport: { width: 1366, height: 850 },
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       locale: 'en-US',
+      timezoneId: 'America/New_York',
+      extraHTTPHeaders: {
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    });
+
+    // Remove the navigator.webdriver flag and other automation fingerprints
+    // that TikTok (and most bot-detection systems) check for before serving real content
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      window.chrome = { runtime: {} };
     });
 
     const page = await context.newPage();
