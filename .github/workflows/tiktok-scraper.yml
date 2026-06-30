@@ -38,12 +38,8 @@ jobs:
           node index.js
         env:
           KEYWORDS: ${{ github.event.inputs.keywords }}
-          RESULTS_FILE: '../public/tiktok-results.json'
+          GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          FARMERSHARVEST_SHEET_ID: ${{ secrets.FARMERSHARVEST_SHEET_ID }}
 
-      - name: Commit results
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add public/tiktok-results.json
-          git diff --staged --quiet || git commit -m "Update TikTok results"
-          git push
+      - name: Done
+        run: echo "Scraper finished, results written to Google Sheets"
