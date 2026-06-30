@@ -232,12 +232,12 @@ body { font-family: var(--sans); background: var(--cream); color: var(--text); m
 
     <div class="harvest-bar">
       <div>
-        <div class="harvest-label"><i class="fa-brands fa-tiktok"></i> &nbsp;TikTok Search</div>
-        <div class="harvest-sub" id="harvestStatus">Searches TikTok live for new Farmers Defense content</div>
+        <div class="harvest-label"><i class="fa-solid fa-globe"></i> &nbsp;Search All Platforms</div>
+        <div class="harvest-sub" id="harvestStatus">Searches TikTok, Instagram, and Facebook for new Farmers Defense content</div>
       </div>
       <div class="harvest-right">
-        <div class="harvest-counter" id="harvestCounter">Ready to search</div>
-        <button id="harvestBtn" class="btn-small" onclick="triggerTikTokHarvest()"><i class="fa-solid fa-magnifying-glass"></i> Search TikTok</button>
+        <div class="harvest-counter" id="harvestCounter">Checking availability...</div>
+        <button id="harvestBtn" class="btn-small" onclick="triggerHarvestAll()" disabled><i class="fa-solid fa-globe"></i> Search All Platforms</button>
       </div>
     </div>
   </div>
@@ -585,62 +585,118 @@ function closeModal(){
 document.getElementById('videoModal').addEventListener('click', function(e){ if(e.target === this) closeModal(); });
 document.getElementById('searchInput').addEventListener('keydown', e => { if(e.key === 'Enter') runSearch(); });
 
-// TIKTOK SEARCH — 30 second cooldown between searches instead of a daily cap.
-// This naturally prevents rapid-fire requests (the actual bot-detection risk)
-// without arbitrarily blocking legitimate use across a busy hour.
-const COOLDOWN_MS = 30000; // 30 seconds
-let lastSearchTime = parseInt(localStorage.getItem('lastTikTokSearch') || '0');
-let searchCountToday = parseInt(localStorage.getItem('tiktokSearchCount_'+new Date().toDateString()) || '0');
-let cooldownInterval = null;
+// SEARCH ALL PLATFORMS — cooldown is enforced server-side (stored in the sheet itself),
+// so it's consistent for anyone using the app, not just the browser that clicked the button.
+// On page load we ask the server what the real status is rather than guessing locally.
+let harvestPollInterval = null;
 
-function updateHarvestCounter(){
+async function refreshHarvestStatus(){
   const counter = document.getElementById('harvestCounter');
   const btn = document.getElementById('harvestBtn');
-  const remaining = COOLDOWN_MS - (Date.now() - lastSearchTime);
-
-  if(remaining > 0){
-    const secs = Math.ceil(remaining / 1000);
-    if(counter) counter.textContent = 'Wait ' + secs + 's · ' + searchCountToday + ' searches today';
-    if(btn) btn.disabled = true;
-    if(!cooldownInterval){
-      cooldownInterval = setInterval(updateHarvestCounter, 1000);
-    }
-  } else {
-    if(counter) counter.textContent = searchCountToday + ' search' + (searchCountToday!==1?'es':'') + ' today · ready';
-    if(btn) btn.disabled = false;
-    if(cooldownInterval){ clearInterval(cooldownInterval); cooldownInterval = null; }
-  }
-}
-
-async function triggerTikTokHarvest(){
-  const remaining = COOLDOWN_MS - (Date.now() - lastSearchTime);
-  if(remaining > 0){
-    alert('Please wait ' + Math.ceil(remaining/1000) + ' more seconds before searching again.\\n\\nThis short cooldown helps avoid triggering TikTok bot detection.');
-    return;
-  }
-
-  lastSearchTime = Date.now();
-  searchCountToday++;
-  localStorage.setItem('lastTikTokSearch', lastSearchTime);
-  localStorage.setItem('tiktokSearchCount_'+new Date().toDateString(), searchCountToday);
-  updateHarvestCounter();
-
-  const btn=document.getElementById('harvestBtn');
-  const status=document.getElementById('harvestStatus');
-  btn.disabled=true;
-  btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Searching...';
-  status.textContent='Triggering TikTok search via GitHub Actions...';
   try{
-    const r=await fetch('/api/harvest-tiktok',{method:'POST'});
-    const d=await r.json();
-    if(d.ok){ status.textContent='✓ Search triggered! Results appear in 2-3 minutes. Switch to TikTok tab to see them.'; btn.innerHTML='<i class="fa-solid fa-check"></i> Triggered!'; setTimeout(()=>{btn.innerHTML='<i class="fa-solid fa-magnifying-glass"></i> Search TikTok';updateHarvestCounter();},3000); setTimeout(()=>{if(currentPlatform==='tt')loadTikTokResults();},180000); }
-    else throw new Error(d.error);
-  }catch(err){
-    status.textContent='Error: '+err.message;
-    btn.innerHTML='<i class="fa-solid fa-magnifying-glass"></i> Search TikTok';
-    updateHarvestCounter();
+    const r = await fetch('/api/harvest-status');
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error || 'Could not check status');
+
+    if(d.canRunNow){
+      counter.textContent = d.lastRun ? 'Ready · last run ' + new Date(d.lastRun).toLocaleDateString() : 'Ready · never run yet';
+      btn.disabled = false;
+    } else {
+      counter.textContent = 'Available again in ' + d.remainingDays + ' day' + (d.remainingDays !== 1 ? 's' : '');
+      btn.disabled = true;
+    }
+  } catch(err){
+    console.error('Could not check harvest status:', err);
+    counter.textContent = 'Status unavailable';
+    btn.disabled = false; // fail open — let the server itself reject the request if the cooldown is genuinely still active, rather than permanently locking the button over a transient status-check failure
   }
 }
+
+async function triggerHarvestAll(){
+  const btn = document.getElementById('harvestBtn');
+  const status = document.getElementById('harvestStatus');
+
+  const confirmed = confirm('This will search TikTok, Instagram, and Facebook for new Farmers Defense content.\n\nThis uses paid search credits and can only be run once every 7 days to stay within budget. The search itself takes a few minutes to complete.\n\nContinue?');
+  if(!confirmed) return;
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Starting...';
+  status.textContent = 'Starting search across all platforms...';
+
+  try {
+    const r = await fetch('/api/harvest-all', { method: 'POST' });
+    const d = await r.json();
+
+    if(r.status === 429){
+      // Cooldown rejected us server-side even though our local check said it was fine —
+      // this can happen if someone else triggered a run in between, or our status
+      // check was stale. Refresh the real status rather than just showing a generic error.
+      status.textContent = d.error;
+      btn.innerHTML = '<i class="fa-solid fa-globe"></i> Search All Platforms';
+      await refreshHarvestStatus();
+      return;
+    }
+
+    if(!d.ok) throw new Error(d.error || 'Could not start harvest');
+
+    status.textContent = 'Searching... this takes a few minutes. You can keep using the app while this runs.';
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Searching...';
+
+    // Poll for job completion every 8 seconds. This polling traffic also keeps the
+    // server "awake" on hosts that spin down idle instances after inactivity.
+    if(harvestPollInterval) clearInterval(harvestPollInterval);
+    harvestPollInterval = setInterval(pollHarvestJob, 8000);
+    pollHarvestJob(); // check immediately too, don't wait the full 8s for the first check
+
+  } catch(err) {
+    status.textContent = 'Error: ' + err.message;
+    btn.innerHTML = '<i class="fa-solid fa-globe"></i> Search All Platforms';
+    await refreshHarvestStatus();
+  }
+}
+
+async function pollHarvestJob(){
+  const btn = document.getElementById('harvestBtn');
+  const status = document.getElementById('harvestStatus');
+
+  try {
+    const r = await fetch('/api/harvest-job-status');
+    const job = await r.json();
+
+    if(job.status === 'running'){
+      const elapsedSec = Math.floor((Date.now() - job.startedAt) / 1000);
+      status.textContent = 'Still searching... (' + elapsedSec + 's elapsed)';
+      return; // keep polling
+    }
+
+    // Job finished one way or another — stop polling
+    if(harvestPollInterval){ clearInterval(harvestPollInterval); harvestPollInterval = null; }
+    btn.innerHTML = '<i class="fa-solid fa-globe"></i> Search All Platforms';
+
+    if(job.status === 'done' && job.result){
+      const res = job.result;
+      const parts = [];
+      if(res.platforms?.tiktok) parts.push('TikTok: ' + (res.platforms.tiktok.ok ? res.platforms.tiktok.count + ' found' : 'failed'));
+      if(res.platforms?.instagram) parts.push('Instagram: ' + (res.platforms.instagram.ok ? res.platforms.instagram.count + ' found' : 'failed'));
+      if(res.platforms?.googleSearch) parts.push('Facebook/IG search: ' + (res.platforms.googleSearch.ok ? res.platforms.googleSearch.count + ' found' : 'failed'));
+      status.textContent = '✓ Done! Added ' + res.added + ' new item' + (res.added !== 1 ? 's' : '') + ' to the sheet. (' + parts.join(' · ') + ')';
+
+      // Refresh whichever platform tab is currently active so new results show immediately
+      if(currentPlatform === 'tt') loadTikTokResults();
+    } else if(job.status === 'error'){
+      status.textContent = 'Harvest failed: ' + (job.error || 'Unknown error');
+    }
+
+    await refreshHarvestStatus(); // update the cooldown display now that a run just happened
+  } catch(err){
+    console.error('Error polling harvest job:', err);
+    // Don't stop polling on a single failed poll attempt — could be a transient
+    // network blip while the long-running job is still genuinely in progress on the server.
+  }
+}
+
+// Check real cooldown status on page load
+refreshHarvestStatus();
 
 async function loadTikTokResults(){
   try{
@@ -669,13 +725,12 @@ async function loadTikTokResults(){
     searchResults = [];
     document.getElementById('emptyState').style.display='block';
     document.getElementById('emptyState').querySelector('.empty-title').textContent='No TikTok results yet';
-    document.getElementById('emptyState').querySelector('.empty-sub').textContent='Press Harvest TikTok to search for content. Results appear here after 2-3 minutes.';
+    document.getElementById('emptyState').querySelector('.empty-sub').textContent='Press "Search All Platforms" above to search for content. This can take a few minutes to complete.';
     document.getElementById('resultsGrid').style.display='none';
     updateCounts();
   }
 }
 
-updateHarvestCounter();
 updateCounts();
 </script>
 </body>
