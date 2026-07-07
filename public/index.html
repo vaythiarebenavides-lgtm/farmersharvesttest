@@ -479,7 +479,7 @@ function renderResults(filtered){
     const platformIcon = r.platform==='yt'?'youtube':r.platform==='tt'?'tiktok':r.platform==='ig'?'instagram':'facebook';
     const hasRights = !!usageRights[r.id];
     const thumbContent = r.thumb
-      ? `<img src="${r.thumb}" onerror="this.style.display='none'">`
+      ? `<img src="${r.thumb}" referrerpolicy="no-referrer" onerror="this.style.display='none'">`
       : `<div class="result-thumb-placeholder"><i class="fa-brands fa-${platformIcon}"></i><span>${r.platform.toUpperCase()}</span></div>`;
     return `
     <div class="result-card ${hasRights?'has-rights':''}" onclick="openModal('${r.id}')">
@@ -769,16 +769,13 @@ async function loadSheetResults(){
 
     searchResults = d.data.map(item => {
       const platformCode = platformTextToCode(item.platform);
-      // Wrap thumbnail URLs through our /api/img proxy so Instagram / TikTok CDN
-      // hosts don't 403 on the browser's Referer header. Data URLs (rare, from
-      // Google Search image snippets) go through directly since there's nothing
-      // to proxy. Empty thumbs stay empty and the card shows the placeholder.
-      let thumb = null;
-      if (item.thumb) {
-        thumb = item.thumb.startsWith('data:')
-          ? item.thumb
-          : '/api/img?url=' + encodeURIComponent(item.thumb);
-      }
+      // Thumbnails are loaded directly by the browser (not through our server proxy).
+      // Instagram and Facebook CDN URLs are signed with tokens tied to the requester's
+      // IP address — a server-side proxy on Render always got 403 no matter what
+      // headers we sent. The browser, with referrerpolicy="no-referrer" set on the
+      // <img> tag, loads them successfully because it's a normal residential IP
+      // and no referrer means IG/FB can't detect it as unauthorized hotlinking.
+      // Caveat: IG/FB URLs expire ~24-48h after harvest. Fresh runs get fresh URLs.
       return {
         id: 'row-' + item.rowIndex,
         rowIndex: item.rowIndex,
@@ -790,7 +787,7 @@ async function loadSheetResults(){
         date: item.date,
         platform: platformCode,
         type: 'short',
-        thumb,
+        thumb: item.thumb || null,
       };
     });
 
