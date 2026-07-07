@@ -425,21 +425,27 @@ async function runFullHarvest(sheets) {
   // Run all three platforms. Each is wrapped so a failure in one doesn't stop the others.
   const [tiktokRun, instagramRun, googleRun] = await Promise.all([
     runApifyActor('clockworks~tiktok-scraper', {
-      // Widened the hashtag list to cast a broader net for genuinely different UGC.
-      // TikTok's hashtag pages return roughly the same top-performing 200 posts each
-      // run — that's why repeat runs on just 2 hashtags kept finding the same content.
-      // Adding brand-adjacent product hashtags surfaces creators who tag their content
-      // with what they're wearing/using rather than the brand name specifically.
+      // Strategy: wider net, shallower depth per target. TikTok's hashtag pages return
+      // roughly the same top posts each run, so pulling 100 from just 2 hashtags meant
+      // seeing mostly the same content. Better to pull 40 from 7 hashtags PLUS pull from
+      // the brand profile and TikTok's search feed — three different discovery mechanisms
+      // that each surface different content.
       hashtags: [
         'farmersdefense',
         'farmersdefensegloves',
         'farmersdefensesleeves',
+        'farmersdefensehat',
         'gardengloves',
-        'gardeninggloves',
         'uvsleeves',
         'sunprotectionsleeves',
       ],
-      resultsPerPage: 100,
+      // Brand's own profile — surfaces official posts and often reposts of UGC creators
+      profiles: ['farmersdefense'],
+      // Search feed — completely different discovery path than hashtag pages, finds
+      // videos where creators mention "farmers defense" in captions but didn't hashtag it
+      searchQueries: ['farmers defense', 'farmersdefense gloves'],
+      // 40 per input × 10 total inputs = ~400 items max, ~$1.50/run cap
+      resultsPerPage: 40,
       shouldDownloadVideos: false,
       shouldDownloadCovers: false,
       shouldDownloadAvatars: false,
@@ -453,30 +459,40 @@ async function runFullHarvest(sheets) {
     }, 'TikTok'),
 
     runApifyActor('apify~instagram-scraper', {
-      // BIG CHANGE — abandoning hashtag search entirely. Real Instagram UGC for this
-      // brand lives at the account's *tagged* page, not under the #farmersdefense
-      // hashtag (creators tag @farmersdefense, not the hashtag itself). The v13
-      // hashtag fix worked mechanically but the source was dry — 1 result confirmed
-      // both via API and via manual Apify web-UI runs. The tagged page is public and
-      // scrapable via directUrls and returns actual creator UGC.
+      // Real Instagram UGC for this brand lives at the account's *tagged* page, NOT
+      // under the hashtag (creators tag @farmersdefense, not #farmersdefense). Hashtag
+      // search returned 1 result even with the v13 form-defaults fix, confirmed via
+      // both API and manual Apify web-UI runs — the source is dry.
       //
-      // We also keep the two hashtag URLs as a safety net in case any content does
-      // start showing up there over time. All routed through directUrls to sidestep
-      // the "saved form defaults get merged with API input" trap that bit us before.
+      // The tagged page is public and Apify's scraper supports it via directUrls.
+      // We include the two hashtag URLs as belt-and-braces in case any content ever
+      // shows up there. resultsLimit is the *total* across all directUrls, kept low
+      // (80) so a run completes in under ~30s and costs under $0.20.
       directUrls: [
         'https://www.instagram.com/farmersdefense/tagged/',
         'https://www.instagram.com/explore/tags/farmersdefense/',
         'https://www.instagram.com/explore/tags/farmersdefensegloves/',
       ],
       resultsType: 'posts',
-      resultsLimit: 200,
+      resultsLimit: 80,
       addParentData: false,
     }, 'Instagram'),
 
     runApifyActor('apify~google-search-scraper', {
-      queries: 'site:facebook.com "farmers defense" reels\nsite:instagram.com "farmers defense"\nsite:facebook.com "farmersdefense"\nsite:instagram.com "farmersdefense"',
-      maxPagesPerQuery: 2, // raised from 1 — more pages per query means more total
-                           // links found; doubled the number of query variations too
+      // This Actor exists specifically as the Facebook workaround — Facebook has no
+      // scrapable public API/hashtag search, so we surface FB posts via Google Search.
+      // Instagram queries are kept as the original bonus-coverage design (some IG posts
+      // show up here that the IG scraper misses). Do NOT add TikTok or generic queries
+      // here — those belong in their own scrapers, not this one.
+      queries: [
+        'site:facebook.com "farmers defense" reels',
+        'site:facebook.com "farmers defense" video',
+        'site:facebook.com "farmers defense" gloves',
+        'site:facebook.com "farmersdefense"',
+        'site:instagram.com "farmers defense"',
+        'site:instagram.com "farmersdefense"',
+      ].join('\n'),
+      maxPagesPerQuery: 2,
       mobileResults: false,
       includeUnfilteredResults: false,
       forceExactMatch: false,
