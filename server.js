@@ -19,19 +19,25 @@ function getGoogleAuth() {
 }
 
 const SHEET_NAME = 'Sheet1';
-const SHEET_RANGE = `'${SHEET_NAME}'!A:H`;
-// Columns: Platform | Creator | Title/Caption | Link | Views | Date Posted | Date Discovered | Usage Rights
+const SHEET_RANGE = `'${SHEET_NAME}'!A:I`;
+// Columns: Platform | Creator | Title/Caption | Link | Views | Date Posted | Date Discovered | Usage Rights | Thumbnail
+// Column I (Thumbnail) was added later — existing rows will have it blank and fall back
+// to the placeholder in the UI. New harvest runs populate it. Column J is left as a
+// buffer, K1 continues to store the cooldown timestamp exactly as before.
 
 // ── ENSURE HEADERS EXIST ──
 async function ensureHeaders(sheets) {
-  const r = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `'${SHEET_NAME}'!A1:H1` });
+  const r = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `'${SHEET_NAME}'!A1:I1` });
   const row = r.data.values?.[0];
-  if (!row || row.length === 0 || row[0] !== 'Platform') {
+  // Re-write the header row if it's missing entirely, or if it's stuck on the old 8-column
+  // layout that doesn't yet have the Thumbnail column at position I.
+  const needsWrite = !row || row.length === 0 || row[0] !== 'Platform' || row[8] !== 'Thumbnail';
+  if (needsWrite) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: SHEET_ID,
-      range: `'${SHEET_NAME}'!A1:H1`,
+      range: `'${SHEET_NAME}'!A1:I1`,
       valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [['Platform', 'Creator', 'Title/Caption', 'Link', 'Views', 'Date Posted', 'Date Discovered', 'Usage Rights']] },
+      requestBody: { values: [['Platform', 'Creator', 'Title/Caption', 'Link', 'Views', 'Date Posted', 'Date Discovered', 'Usage Rights', 'Thumbnail']] },
     });
   }
 }
@@ -54,6 +60,7 @@ app.get('/api/sheet-data', async (req, res) => {
       date: row[5] || '',
       discoveredAt: row[6] || '',
       usageRights: row[7] === 'TRUE' || row[7] === 'Yes' || row[7] === true,
+      thumb: row[8] || '', // Column I — empty string for legacy rows, real URL for post-migration rows
     }));
     res.json({ ok: true, data });
   } catch (err) {
@@ -86,6 +93,7 @@ app.post('/api/sheet-add', async (req, res) => {
         item.date || '',
         new Date().toISOString().split('T')[0],
         'FALSE',
+        item.thumb || '', // Column I — thumbnail URL when the scraper captured one
       ]);
 
     if (rowsToAdd.length === 0) {
@@ -215,6 +223,15 @@ function parseTikTokItems(items) {
       const dateRaw = item.createTimeISO || item.createTime || '';
       const date = typeof dateRaw === 'string' && dateRaw.includes('T') ? dateRaw.split('T')[0] : '';
 
+      // Thumbnail — TikTok scraper puts the video cover image under several possible
+      // field names depending on scraper version. coverUrl is the primary/current one.
+      const thumb =
+        item.videoMeta?.coverUrl ||
+        item.videoMeta?.originalCoverUrl ||
+        item.covers?.[0] ||
+        item.videoMeta?.dynamicCover ||
+        '';
+
       return {
         platform: 'TikTok',
         creator,
@@ -222,6 +239,7 @@ function parseTikTokItems(items) {
         url: item.webVideoUrl || item.videoUrl,
         views: formatViews(views),
         date,
+        thumb,
       };
     });
 }
@@ -243,6 +261,17 @@ function parseInstagramItems(items) {
       const dateRaw = item.timestamp || item.takenAt || '';
       const date = typeof dateRaw === 'string' && dateRaw.includes('T') ? dateRaw.split('T')[0] : '';
 
+      // Thumbnail — Instagram's Apify scraper returns displayUrl for posts/reels images,
+      // thumbnailUrl for video posts, and sometimes an images[] array on carousels.
+      // These URLs return 403 when hotlinked from a browser due to Instagram's referrer
+      // check, so the frontend routes them through /api/img on our own server which strips
+      // the referrer before fetching.
+      const thumb =
+        item.displayUrl ||
+        item.thumbnailUrl ||
+        (Array.isArray(item.images) && item.images[0]) ||
+        '';
+
       return {
         platform: 'Instagram',
         creator,
@@ -250,6 +279,7 @@ function parseInstagramItems(items) {
         url: item.url,
         views: formatViews(views),
         date,
+        thumb,
       };
     });
 }
@@ -284,6 +314,10 @@ function parseGoogleSearchItems(items) {
         url: link,
         views: '', // Google search doesn't expose view counts
         date: '', // Google search doesn't expose post dates reliably
+        // Google Search results often don't include a thumbnail, but a few plausible
+        // field names show up depending on the result type. If none are present the
+        // sheet cell stays empty and the UI shows a placeholder — acceptable fallback.
+        thumb: result.thumbnailImageUrl || result.image || result.imageUrl || '',
       });
     }
   }
@@ -391,14 +425,21 @@ async function runFullHarvest(sheets) {
   // Run all three platforms. Each is wrapped so a failure in one doesn't stop the others.
   const [tiktokRun, instagramRun, googleRun] = await Promise.all([
     runApifyActor('clockworks~tiktok-scraper', {
-      // Searching the two confirmed hashtags directly (rather than the bare word
-      // "farmersdefense") cuts out a lot of the unrelated noise we saw last run —
-      // things like news stories about farmers fighting bandits don't use these
-      // specific hashtags, even though they contain the word "farmers" or "defense".
-      hashtags: ['farmersdefense', 'farmersdefensegloves'],
-      resultsPerPage: 100, // raised from 50 — our actual cost last run was $0.01,
-                           // nowhere near our $1.65/month budget share, so there's
-                           // real room to pull more volume per run
+      // Widened the hashtag list to cast a broader net for genuinely different UGC.
+      // TikTok's hashtag pages return roughly the same top-performing 200 posts each
+      // run — that's why repeat runs on just 2 hashtags kept finding the same content.
+      // Adding brand-adjacent product hashtags surfaces creators who tag their content
+      // with what they're wearing/using rather than the brand name specifically.
+      hashtags: [
+        'farmersdefense',
+        'farmersdefensegloves',
+        'farmersdefensesleeves',
+        'gardengloves',
+        'gardeninggloves',
+        'uvsleeves',
+        'sunprotectionsleeves',
+      ],
+      resultsPerPage: 100,
       shouldDownloadVideos: false,
       shouldDownloadCovers: false,
       shouldDownloadAvatars: false,
@@ -412,16 +453,23 @@ async function runFullHarvest(sheets) {
     }, 'TikTok'),
 
     runApifyActor('apify~instagram-scraper', {
-      // Explicitly clearing directUrls to prevent Apify from merging our input
-      // with the saved form defaults (which had humansofny example URL still in it).
-      // Without this, Apify was ignoring our search field entirely and using the
-      // saved form state, causing the near-zero results we saw in real runs.
-      directUrls: [],
-      search: 'farmersdefense',
-      searchType: 'hashtag',
-      searchLimit: 100,
-      resultsType: 'posts', // broader than reels-only, catches more content types
-      resultsLimit: 100,
+      // BIG CHANGE — abandoning hashtag search entirely. Real Instagram UGC for this
+      // brand lives at the account's *tagged* page, not under the #farmersdefense
+      // hashtag (creators tag @farmersdefense, not the hashtag itself). The v13
+      // hashtag fix worked mechanically but the source was dry — 1 result confirmed
+      // both via API and via manual Apify web-UI runs. The tagged page is public and
+      // scrapable via directUrls and returns actual creator UGC.
+      //
+      // We also keep the two hashtag URLs as a safety net in case any content does
+      // start showing up there over time. All routed through directUrls to sidestep
+      // the "saved form defaults get merged with API input" trap that bit us before.
+      directUrls: [
+        'https://www.instagram.com/farmersdefense/tagged/',
+        'https://www.instagram.com/explore/tags/farmersdefense/',
+        'https://www.instagram.com/explore/tags/farmersdefensegloves/',
+      ],
+      resultsType: 'posts',
+      resultsLimit: 200,
       addParentData: false,
     }, 'Instagram'),
 
@@ -484,7 +532,11 @@ async function runFullHarvest(sheets) {
         item.date || '',
         new Date().toISOString().split('T')[0],
         'FALSE',
+        item.thumb || '', // Column I — thumbnail URL when the scraper captured one
       ]);
+
+    const skipped = allRows.length - rowsToAdd.length;
+    console.log(`[Sheet] After dedup: ${rowsToAdd.length} new rows to add, ${skipped} skipped as duplicates (of ${allRows.length} filtered rows total)`);
 
     if (rowsToAdd.length > 0) {
       await sheets.spreadsheets.values.append({
@@ -494,6 +546,9 @@ async function runFullHarvest(sheets) {
         insertDataOption: 'INSERT_ROWS',
         requestBody: { values: rowsToAdd },
       });
+      console.log(`[Sheet] Successfully wrote ${rowsToAdd.length} new rows`);
+    } else {
+      console.log(`[Sheet] Nothing new to write — every URL in this run was already in the sheet`);
     }
     added = rowsToAdd.length;
 
@@ -554,6 +609,49 @@ app.get('/api/tiktok-embed', async (req, res) => {
     res.json({ ok: true, html: data.html, thumbnail: data.thumbnail_url, title: data.title, author: data.author_name });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Image proxy — strips the browser's Referer header when fetching a thumbnail so that
+// Instagram (and occasionally TikTok) CDN URLs don't 403 the request. The frontend
+// routes all sheet-backed thumbnail URLs through this endpoint. Whitelisted to the
+// handful of CDN hosts we actually use so the endpoint can't be turned into an
+// open proxy for arbitrary URLs.
+const ALLOWED_IMG_HOSTS = [
+  'cdninstagram.com', 'fbcdn.net',       // Instagram/Facebook CDNs
+  'tiktokcdn.com', 'tiktokcdn-us.com',   // TikTok CDNs
+  'googleusercontent.com',                // Google Search snippet images
+  'gstatic.com',                          // Google image thumbnails
+];
+app.get('/api/img', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).send('Missing url');
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return res.status(400).send('Invalid url');
+  }
+  const hostOk = ALLOWED_IMG_HOSTS.some(h => parsed.hostname === h || parsed.hostname.endsWith('.' + h));
+  if (!hostOk) return res.status(403).send('Host not allowed');
+
+  try {
+    const upstream = await fetch(url, {
+      // Deliberately no Referer — that's the whole point of the proxy.
+      // A generic browser UA reduces the chance of getting served a "bot" placeholder.
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      timeout: 10000,
+    });
+    if (!upstream.ok) return res.status(upstream.status).send('Upstream error');
+    const contentType = upstream.headers.get('content-type') || 'image/jpeg';
+    res.set('Content-Type', contentType);
+    // Cache aggressively on the client — thumbnail URLs are effectively immutable
+    // (they contain signed tokens/hashes), so we can safely cache for a day.
+    res.set('Cache-Control', 'public, max-age=86400');
+    upstream.body.pipe(res);
+  } catch (err) {
+    console.error('Image proxy error:', err.message);
+    res.status(502).send('Proxy fetch failed');
   }
 });
 

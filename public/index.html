@@ -720,6 +720,16 @@ async function loadSheetResults(){
 
     searchResults = d.data.map(item => {
       const platformCode = platformTextToCode(item.platform);
+      // Wrap thumbnail URLs through our /api/img proxy so Instagram / TikTok CDN
+      // hosts don't 403 on the browser's Referer header. Data URLs (rare, from
+      // Google Search image snippets) go through directly since there's nothing
+      // to proxy. Empty thumbs stay empty and the card shows the placeholder.
+      let thumb = null;
+      if (item.thumb) {
+        thumb = item.thumb.startsWith('data:')
+          ? item.thumb
+          : '/api/img?url=' + encodeURIComponent(item.thumb);
+      }
       return {
         id: 'row-' + item.rowIndex,
         rowIndex: item.rowIndex,
@@ -731,7 +741,7 @@ async function loadSheetResults(){
         date: item.date,
         platform: platformCode,
         type: 'short',
-        thumb: null,
+        thumb,
       };
     });
 
