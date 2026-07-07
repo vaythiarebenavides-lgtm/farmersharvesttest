@@ -309,7 +309,7 @@ function parseGoogleSearchItems(items) {
 
       rows.push({
         platform: isFacebook ? 'Facebook' : 'Instagram',
-        creator: extractHandleFromUrl(link) || (result.title || '').slice(0, 60) || 'Unknown',
+        creator: extractCreator(link, result.title) || 'Unknown',
         title: (result.description || result.snippet || result.title || '').slice(0, 300),
         url: link,
         views: '', // Google search doesn't expose view counts
@@ -324,13 +324,50 @@ function parseGoogleSearchItems(items) {
   return rows;
 }
 
-function extractHandleFromUrl(url) {
+// URL path segments that look like usernames but aren't — they're URL type/section
+// markers (e.g. instagram.com/p/POSTID means "p" is the type "post", not a creator).
+// The old extractHandleFromUrl blindly took the first segment as the creator, which
+// polluted the sheet with fake handles like @p, @reel, @groups, @marketplace. This
+// list is the union of Instagram + Facebook URL section names so we can reject them
+// during creator extraction.
+const RESERVED_URL_SEGMENTS = new Set([
+  // Instagram URL sections
+  'p', 'reel', 'reels', 'tv', 'stories', 'explore', 'accounts', 'direct', 's',
+  // Facebook URL sections
+  'watch', 'groups', 'marketplace', 'pages', 'events', 'pg', 'permalink.php',
+  'share', 'story.php', 'video.php', 'photo.php', 'media', 'posts', 'videos',
+  'photos', 'plugins', 'help', 'business', 'search', 'hashtag', 'gaming',
+  'notes', 'donate', 'fundraisers', 'saved', 'lite', 'l.php', 'ads', 'login',
+  'signup', 'privacy', 'policies', 'terms', 'settings', 'about', 'careers',
+]);
+
+// Attempt to derive a real creator handle from a Facebook or Instagram URL,
+// falling back to a title-based lookup if the URL's first path segment is one
+// of the reserved section keywords above. Returns "@handle" or null (caller
+// decides whether to use "Unknown" or leave the field alone).
+function extractCreator(url, title) {
   try {
-    const match = url.match(/(?:facebook|instagram)\.com\/([^/?]+)/);
-    return match ? '@' + match[1] : null;
-  } catch (e) {
-    return null;
+    const match = url.match(/(?:facebook|instagram)\.com\/([^/?#]+)/i);
+    if (match) {
+      const seg = match[1];
+      const lower = seg.toLowerCase();
+      // If the first segment isn't a URL type marker, treat it as the creator
+      if (!RESERVED_URL_SEGMENTS.has(lower) && !lower.endsWith('.php') && seg.length > 0) {
+        return '@' + seg;
+      }
+    }
+  } catch {}
+
+  // Title fallback — Instagram Google-search results usually look like
+  //   "Kalika Bastola (@kalikabastola) on Instagram: ..."
+  // Extract the (@handle) if present. Facebook titles rarely include handles,
+  // so this mostly helps Instagram — that's fine, IG is the bigger offender.
+  if (title) {
+    const m = title.match(/\(@([a-z0-9._]+)\)/i);
+    if (m) return '@' + m[1];
   }
+
+  return null;
 }
 
 // ── RELEVANCE FILTER ──
@@ -648,6 +685,46 @@ app.post('/api/backfill-thumbs', async (req, res) => {
     const r = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: SHEET_RANGE });
     const rows = r.data.values || [];
 
+    // ── STEP 1: Creator cleanup ─────────────────────────────────────────────
+    // Walk every Facebook/Instagram row and fix any creator field that's stuck on
+    // a URL section keyword (e.g. "@p", "@reel", "@groups"). This uses NO external
+    // HTTP calls — just re-runs extractCreator against the URL + title we already
+    // have — so it's fast enough to process the whole sheet in one pass regardless
+    // of BATCH_CAP. Runs first so the sheet's creator column is clean even for
+    // rows that won't get a thumbnail this round.
+    const creatorUpdates = [];
+    let creatorsFixed = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const platform = row[0];
+      if (platform !== 'Instagram' && platform !== 'Facebook') continue;
+      const currentCreator = row[1] || '';
+      const title = row[2] || '';
+      const url = row[3] || '';
+      if (!url) continue;
+      // Only reprocess rows whose current creator looks like a reserved-word handle.
+      // We strip the leading @ (if any) and check the lowercase segment against our set.
+      const currentSeg = currentCreator.replace(/^@/, '').toLowerCase();
+      if (!RESERVED_URL_SEGMENTS.has(currentSeg) && !currentSeg.endsWith('.php')) continue;
+      // Try to derive a real creator. If nothing better is found, downgrade to "Unknown"
+      // rather than leaving a fake-looking @-handle in the sheet.
+      const better = extractCreator(url, title) || 'Unknown';
+      if (better !== currentCreator) {
+        creatorUpdates.push({
+          range: `'${SHEET_NAME}'!B${i + 1}`,
+          values: [[better]],
+        });
+        creatorsFixed++;
+      }
+    }
+    if (creatorUpdates.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: SHEET_ID,
+        requestBody: { valueInputOption: 'RAW', data: creatorUpdates },
+      });
+    }
+
+    // ── STEP 2: Thumbnail backfill ──────────────────────────────────────────
     // Find rows across all three platforms with a URL but empty thumbnail cell.
     // Row 1 is the header, so real data starts at index 1 → sheet row 2.
     const targets = [];
@@ -706,13 +783,14 @@ app.post('/api/backfill-thumbs', async (req, res) => {
       });
     }
 
-    console.log(`[Backfill] tt=${stats.tiktok} ig=${stats.instagram} fb=${stats.facebook} failed=${stats.failed} remaining=${Math.max(0, targets.length - batch.length)}`);
+    console.log(`[Backfill] creators_fixed=${creatorsFixed} tt=${stats.tiktok} ig=${stats.instagram} fb=${stats.facebook} failed=${stats.failed} remaining=${Math.max(0, targets.length - batch.length)}`);
 
     res.json({
       ok: true,
       checked: batch.length,
       updated: stats.tiktok + stats.instagram + stats.facebook,
       byPlatform: { tiktok: stats.tiktok, instagram: stats.instagram, facebook: stats.facebook },
+      creatorsFixed,
       failed: stats.failed,
       totalTargets: targets.length,
       remaining: Math.max(0, targets.length - batch.length),
@@ -737,42 +815,71 @@ async function fetchTikTokOembedThumb(url) {
   }
 }
 
-// Helper: fetch any URL's OpenGraph preview image by extracting the og:image meta tag
-// from the HTML head. Instagram and Facebook both serve full OpenGraph metadata to
-// crawler-identified User-Agents (they use this for link previews on other platforms),
-// so pretending to be Facebook's own link-preview bot is more reliable than pretending
-// to be a browser (which would get an SPA shell without meta tags populated server-side).
+// Helper: fetch any URL's OpenGraph preview image by extracting the og:image meta tag.
+// Different platforms respond differently to different User-Agents — Instagram in
+// particular is stricter than Facebook, so we try a sequence of UAs and return the
+// first one that yields a usable og:image. Order matters:
+//   1. iPhone Safari — Instagram serves the fullest metadata to mobile Safari
+//   2. facebookexternalhit — canonical link-preview bot, works reliably on FB pages
+//   3. Chrome desktop — final fallback for anything the first two miss
 async function fetchOgImage(url) {
-  try {
-    const r = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; facebookexternalhit/1.1; +http://www.facebook.com/externalhit_uatext.php)',
-      },
-      timeout: 8000,
-      redirect: 'follow',
-    });
-    if (!r.ok) return null;
-    const html = await r.text();
-    // Try both attribute orders — the property and content attrs can appear either way round
-    const m = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i)
-      || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i);
-    return m ? m[1] : null;
-  } catch {
-    return null;
+  const uas = [
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (compatible; facebookexternalhit/1.1; +http://www.facebook.com/externalhit_uatext.php)',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  ];
+  for (const ua of uas) {
+    try {
+      const r = await fetch(url, {
+        headers: { 'User-Agent': ua, 'Accept-Language': 'en-US,en;q=0.9' },
+        timeout: 8000,
+        redirect: 'follow',
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      // Match og:image OR og:image:secure_url — either attribute order
+      const m = html.match(/<meta[^>]*property=["']og:image(?::secure_url)?["'][^>]*content=["']([^"']+)["']/i)
+        || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image(?::secure_url)?["']/i);
+      if (m && m[1]) return m[1];
+    } catch {
+      // Try the next UA in the list
+    }
   }
+  return null;
 }
 
-// Image proxy — strips the browser's Referer header when fetching a thumbnail so that
-// Instagram (and occasionally TikTok) CDN URLs don't 403 the request. The frontend
-// routes all sheet-backed thumbnail URLs through this endpoint. Whitelisted to the
-// handful of CDN hosts we actually use so the endpoint can't be turned into an
-// open proxy for arbitrary URLs.
+// Image proxy — routes CDN-restricted thumbnail URLs through our server so the browser
+// isn't the one hotlinking them. Different CDNs have different requirements:
+//   - Instagram (cdninstagram.com, instagram.*.fbcdn.net): needs Referer: instagram.com
+//   - Facebook (fbcdn.net, facebook.com): needs Referer: facebook.com
+//   - TikTok (tiktokcdn.com, tiktokcdn-us.com): needs Referer: tiktok.com
+// Without the correct Referer, these CDNs return 403 with an empty body. With it,
+// they serve the image normally because that's how a regular browser loading the
+// same page would look. Whitelisted host list stays for open-proxy safety.
 const ALLOWED_IMG_HOSTS = [
   'cdninstagram.com', 'fbcdn.net',       // Instagram/Facebook CDNs
   'tiktokcdn.com', 'tiktokcdn-us.com',   // TikTok CDNs
   'googleusercontent.com',                // Google Search snippet images
   'gstatic.com',                          // Google image thumbnails
 ];
+
+// Given a hostname, return the appropriate Referer for that CDN. Instagram's regional
+// CDNs sometimes live under instagram.*.fbcdn.net (both markers present) — the
+// instagram.* prefix wins because those URLs come from Instagram post pages, so
+// referring from instagram.com is what the browser would naturally send.
+function refererForHost(hostname) {
+  if (hostname.startsWith('instagram.') || hostname.endsWith('cdninstagram.com')) {
+    return 'https://www.instagram.com/';
+  }
+  if (hostname.endsWith('fbcdn.net') || hostname.endsWith('facebook.com')) {
+    return 'https://www.facebook.com/';
+  }
+  if (hostname.endsWith('tiktokcdn.com') || hostname.endsWith('tiktokcdn-us.com')) {
+    return 'https://www.tiktok.com/';
+  }
+  return null; // Google hosts don't need a Referer
+}
+
 app.get('/api/img', async (req, res) => {
   const { url } = req.query;
   if (!url) return res.status(400).send('Missing url');
@@ -786,21 +893,28 @@ app.get('/api/img', async (req, res) => {
   if (!hostOk) return res.status(403).send('Host not allowed');
 
   try {
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    };
+    const ref = refererForHost(parsed.hostname);
+    if (ref) headers['Referer'] = ref;
+
     const upstream = await fetch(url, {
-      // Deliberately no Referer — that's the whole point of the proxy.
-      // A generic browser UA reduces the chance of getting served a "bot" placeholder.
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      headers,
       timeout: 10000,
     });
-    if (!upstream.ok) return res.status(upstream.status).send('Upstream error');
+    if (!upstream.ok) {
+      console.error(`Image proxy upstream error ${upstream.status} for host ${parsed.hostname}`);
+      return res.status(upstream.status).send('Upstream error');
+    }
     const contentType = upstream.headers.get('content-type') || 'image/jpeg';
     res.set('Content-Type', contentType);
-    // Cache aggressively on the client — thumbnail URLs are effectively immutable
-    // (they contain signed tokens/hashes), so we can safely cache for a day.
+    // Cache aggressively — thumbnail URLs are signed/effectively immutable, safe to cache
     res.set('Cache-Control', 'public, max-age=86400');
     upstream.body.pipe(res);
   } catch (err) {
-    console.error('Image proxy error:', err.message);
+    console.error(`Image proxy error for host ${parsed.hostname}:`, err.message);
     res.status(502).send('Proxy fetch failed');
   }
 });
