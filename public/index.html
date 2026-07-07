@@ -743,9 +743,10 @@ async function runBackfill(){
       let msg = parts.length
         ? `Added thumbnails: ${parts.join(', ')}.`
         : 'No new thumbnails found in this batch.';
+      if (d.creatorsFixed) msg += `\n\nFixed ${d.creatorsFixed} garbled creator names (e.g. @p, @reel, @groups → real handle or "Unknown").`;
       if (d.failed) msg += `\n\n${d.failed} rows had no thumbnail available (usually login-walled Facebook posts or expired Instagram links) — they'll stay as placeholders.`;
       if (d.remaining > 0) msg += `\n\n${d.remaining} rows still to check — click the button again to continue.`;
-      else if (d.updated > 0) msg += '\n\nAll done!';
+      else if (d.updated > 0 || d.creatorsFixed) msg += '\n\nAll done!';
       alert(msg);
       loadSheetResults(); // reload grid so new thumbs appear immediately
     } else {
