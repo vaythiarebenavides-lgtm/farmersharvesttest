@@ -197,7 +197,7 @@ body { font-family: var(--sans); background: var(--cream); color: var(--text); m
 <div class="sidebar">
   <div class="slbl">Navigation</div>
   <a class="sitem active" href="#"><i class="fa-solid fa-magnifying-glass"></i> Search Content</a>
-  <a class="sitem" href="#" onclick="setFilter(document.querySelector('.filter-btn'),'rights');return false"><i class="fa-solid fa-shield-halved"></i> Usage Rights <span class="ctag" id="sideRightsCount">0</span></a>
+  <a class="sitem" href="#" onclick="setFilter('rights');return false"><i class="fa-solid fa-shield-halved"></i> Usage Rights <span class="ctag" id="sideRightsCount">0</span></a>
 
   <div class="slbl" style="margin-top:8px">Platforms</div>
   <a class="sitem active" id="all-nav" href="#" onclick="setPlatform('all',this)"><i class="fa-solid fa-grip"></i> All Platforms</a>
@@ -276,10 +276,10 @@ body { font-family: var(--sans); background: var(--cream); color: var(--text); m
       </div>
 
       <div class="filter-bar">
-        <button class="filter-btn active" onclick="setFilter(this,'all')">All</button>
-        <button class="filter-btn" onclick="setFilter(this,'rights')"><i class="fa-solid fa-shield-halved"></i> Usage rights only</button>
-        <button class="filter-btn" onclick="setFilter(this,'popular')"><i class="fa-solid fa-fire"></i> Most popular</button>
-        <button class="filter-btn" onclick="setFilter(this,'recent')"><i class="fa-regular fa-clock"></i> Most recent</button>
+        <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">All results</button>
+        <button class="filter-btn" data-filter="rights" onclick="setFilter('rights')"><i class="fa-solid fa-shield-halved"></i> Usage rights only</button>
+        <button class="filter-btn" data-filter="popular" onclick="setFilter('popular')"><i class="fa-solid fa-fire"></i> Most popular</button>
+        <button class="filter-btn" data-filter="recent" onclick="setFilter('recent')"><i class="fa-regular fa-clock"></i> Most recent</button>
         <div class="filter-divider"></div>
         <select class="filter-select" id="productFilter" onchange="applyFilters()">
           <option value="">All products</option>
@@ -310,6 +310,14 @@ body { font-family: var(--sans); background: var(--cream); color: var(--text); m
       </div>
 
       <div class="results-grid" id="resultsGrid" style="display:none"></div>
+
+      <!-- Load More button only shows for YouTube searches where the API returned a
+           nextPageToken. Sheet-backed tabs don't paginate, so this stays hidden there. -->
+      <div id="loadMoreWrap" style="display:none; text-align:center; padding: 16px 0;">
+        <button id="loadMoreBtn" onclick="loadMoreYouTube()" style="background: var(--soil); color: var(--harvest); border: 1px solid var(--harvest); padding: 8px 20px; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit;">
+          <i class="fa-solid fa-chevron-down"></i> Load more YouTube results
+        </button>
+      </div>
     </div>
   </div>
 
@@ -343,6 +351,12 @@ let activeFilter = 'all';
 let currentPlatform = 'all';
 let currentModalId = null;
 let usageRights = JSON.parse(localStorage.getItem('usageRights') || '{}');
+// YouTube pagination state — tracks the token for fetching the next batch and the
+// query/order that batch corresponds to, so "Load more" only stays visible while
+// it applies to the currently-displayed results.
+let ytNextPageToken = null;
+let ytLastQuery = null;
+let ytLastOrder = null;
 
 function showComingSoon(name){
   alert(name+' integration is coming soon!');
@@ -355,6 +369,13 @@ function setPlatform(platform, navEl){
     if(nav) nav.classList.toggle('active', p === platform);
     const tab = document.getElementById('tab-'+p);
     if(tab) tab.classList.toggle('active', p === platform);
+  });
+
+  // Sub-filter buttons are independent of platform, so re-apply the current filter's
+  // active-highlight after a platform switch. Without this, the visual highlight can
+  // get out of sync with the actual filter state after certain navigation sequences.
+  document.querySelectorAll('.filter-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.filter === activeFilter);
   });
 
   // Product filter only applies to YouTube results — disable it visually on sheet-backed
@@ -372,10 +393,17 @@ function setPlatform(platform, navEl){
   }
 }
 
-function setFilter(btn, filter){
-  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
-  if(btn) btn.classList.add('active');
+// Filter selection is decoupled from the DOM element that triggered the click.
+// The old signature (setFilter(btn, filter)) meant sidebar links couldn't reliably
+// pass the right button and ended up highlighting "All" while filtering by rights.
+// New signature takes just the filter name and finds the matching button via a
+// data-filter attribute, so any caller (button, sidebar link, keyboard) gets a
+// consistent visual state.
+function setFilter(filter){
   activeFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.filter === filter);
+  });
   applyFilters();
 }
 
@@ -432,12 +460,21 @@ async function runSearch(){
       const order = activeFilter==='popular'?'viewCount':activeFilter==='recent'?'date':'relevance';
       const df = document.getElementById('dateFrom').value;
       const dt = document.getElementById('dateTo').value;
-      let url = `/api/search?query=${encodeURIComponent(query)}&maxResults=12&order=${order}`;
+      // 50 is YouTube API's max per call — was 12 before, which meant repeat searches
+      // returned the exact same 12 results and looked broken. Full 50 gives real breadth.
+      let url = `/api/search?query=${encodeURIComponent(query)}&maxResults=50&order=${order}`;
       if(df) url += `&publishedAfter=${df}`;
       if(dt) url += `&publishedBefore=${dt}`;
       const r = await fetch(url);
       const d = await r.json();
-      if(d.ok){ searchResults = d.results; finishSearch(); }
+      if(d.ok){
+        searchResults = d.results;
+        // Save pagination state so "Load more" knows what to fetch next
+        ytNextPageToken = d.nextPageToken || null;
+        ytLastQuery = query;
+        ytLastOrder = order;
+        finishSearch();
+      }
       else throw new Error(d.error);
     }
   } catch(err) {
@@ -454,7 +491,43 @@ async function runSearch(){
 function finishSearch(){
   document.getElementById('statResults').textContent = searchResults.length;
   document.getElementById('resultsCount').textContent = searchResults.length + ' results';
+  // Show Load More only when YouTube tab is active AND the API returned a nextPageToken.
+  // Sheet-backed tabs don't paginate, so this stays hidden there.
+  const showLoadMore = currentPlatform === 'yt' && ytNextPageToken;
+  document.getElementById('loadMoreWrap').style.display = showLoadMore ? 'block' : 'none';
   applyFilters();
+}
+
+// Fetches the next batch of YouTube results using the pageToken from the last call.
+// Appends onto searchResults rather than replacing, so users see everything they've
+// loaded so far as one continuous list.
+async function loadMoreYouTube(){
+  if(!ytNextPageToken || !ytLastQuery) return;
+  const btn = document.getElementById('loadMoreBtn');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
+  try {
+    let url = `/api/search?query=${encodeURIComponent(ytLastQuery)}&maxResults=50&order=${ytLastOrder}&pageToken=${encodeURIComponent(ytNextPageToken)}`;
+    const df = document.getElementById('dateFrom').value;
+    const dt = document.getElementById('dateTo').value;
+    if(df) url += `&publishedAfter=${df}`;
+    if(dt) url += `&publishedBefore=${dt}`;
+    const r = await fetch(url);
+    const d = await r.json();
+    if(d.ok){
+      searchResults = searchResults.concat(d.results);
+      ytNextPageToken = d.nextPageToken || null;
+      finishSearch();
+    } else {
+      alert('Load more failed: ' + d.error);
+    }
+  } catch(e) {
+    alert('Load more failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
 }
 
 function parseViews(viewStr){

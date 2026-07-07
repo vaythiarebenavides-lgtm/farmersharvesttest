@@ -462,27 +462,28 @@ async function runFullHarvest(sheets) {
   // Run all three platforms. Each is wrapped so a failure in one doesn't stop the others.
   const [tiktokRun, instagramRun, googleRun] = await Promise.all([
     runApifyActor('clockworks~tiktok-scraper', {
-      // Strategy: wider net, shallower depth per target. TikTok's hashtag pages return
-      // roughly the same top posts each run, so pulling 100 from just 2 hashtags meant
-      // seeing mostly the same content. Better to pull 40 from 7 hashtags PLUS pull from
-      // the brand profile and TikTok's search feed — three different discovery mechanisms
-      // that each surface different content.
+      // Only using verified brand-specific and product-specific hashtags. Generic ones
+      // like #sleeves, #farmer, #uvprotection, #sunprotection, #testimonial, #gardeninggear
+      // return mostly unrelated content that our relevance filter then throws away —
+      // we'd be paying Apify to scrape noise. Sticking to hashtags where signal is high.
       hashtags: [
+        // Brand-specific — always high signal
         'farmersdefense',
         'farmersdefensegloves',
         'farmersdefensesleeves',
         'farmersdefensehat',
-        'gardengloves',
-        'uvsleeves',
-        'sunprotectionsleeves',
+        // Product-specific — narrower than the generic alternatives (verified from real posts)
+        'protectionsleeves',
+        'gardensleeves',
       ],
       // Brand's own profile — surfaces official posts and often reposts of UGC creators
       profiles: ['farmersdefense'],
       // Search feed — completely different discovery path than hashtag pages, finds
-      // videos where creators mention "farmers defense" in captions but didn't hashtag it
+      // videos where creators mention "farmers defense" in captions but didn't hashtag it.
+      // This is where the actual UGC growth happens between runs.
       searchQueries: ['farmers defense', 'farmersdefense gloves'],
-      // 40 per input × 10 total inputs = ~400 items max, ~$1.50/run cap
-      resultsPerPage: 40,
+      // 30 per input × 9 total inputs ≈ 270 items max, ~$0.80/run cap
+      resultsPerPage: 30,
       shouldDownloadVideos: false,
       shouldDownloadCovers: false,
       shouldDownloadAvatars: false,
@@ -496,22 +497,23 @@ async function runFullHarvest(sheets) {
     }, 'TikTok'),
 
     runApifyActor('apify~instagram-scraper', {
-      // Real Instagram UGC for this brand lives at the account's *tagged* page, NOT
-      // under the hashtag (creators tag @farmersdefense, not #farmersdefense). Hashtag
-      // search returned 1 result even with the v13 form-defaults fix, confirmed via
-      // both API and manual Apify web-UI runs — the source is dry.
-      //
-      // The tagged page is public and Apify's scraper supports it via directUrls.
-      // We include the two hashtag URLs as belt-and-braces in case any content ever
-      // shows up there. resultsLimit is the *total* across all directUrls, kept low
-      // (80) so a run completes in under ~30s and costs under $0.20.
+      // Real Instagram UGC lives at the account's tagged page — creators tag
+      // @farmersdefense in posts, they don't use #farmersdefense hashtag much.
+      // Tagged page is the goldmine; hashtag URLs are belt-and-braces backup that
+      // costs almost nothing since they typically return 0-2 posts each.
+      // Only verified brand + safe product hashtags — no generics that would just
+      // drag in noise that the relevance filter would throw away anyway.
       directUrls: [
-        'https://www.instagram.com/farmersdefense/tagged/',
+        'https://www.instagram.com/farmersdefense/tagged/',      // UGC goldmine
         'https://www.instagram.com/explore/tags/farmersdefense/',
         'https://www.instagram.com/explore/tags/farmersdefensegloves/',
+        'https://www.instagram.com/explore/tags/farmersdefensesleeves/',
+        'https://www.instagram.com/explore/tags/farmersdefensehat/',
+        'https://www.instagram.com/explore/tags/protectionsleeves/',
+        'https://www.instagram.com/explore/tags/gardensleeves/',
       ],
       resultsType: 'posts',
-      resultsLimit: 80,
+      resultsLimit: 100,
       addParentData: false,
     }, 'Instagram'),
 
@@ -921,22 +923,29 @@ app.get('/api/img', async (req, res) => {
 
 // YouTube search
 app.get('/api/search', async (req, res) => {
-  const { query, maxResults = 12, order = 'relevance', publishedAfter, publishedBefore } = req.query;
+  const { query, maxResults = 50, order = 'relevance', publishedAfter, publishedBefore, pageToken } = req.query;
   if (!query) return res.status(400).json({ error: 'Query required' });
   try {
+    // maxResults default raised from 12 to 50 (the API's per-call max) so first-page
+    // searches return real breadth. pageToken enables the "Load more" button on the
+    // frontend to fetch subsequent pages by passing the token YouTube returned last time.
     let url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(query)}&maxResults=${maxResults}&order=${order}&key=${YT_KEY}`;
     if (publishedAfter) url += `&publishedAfter=${publishedAfter}T00:00:00Z`;
     if (publishedBefore) url += `&publishedBefore=${publishedBefore}T23:59:59Z`;
+    if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
     const r = await fetch(url);
     const data = await r.json();
     if (data.error) return res.status(400).json({ error: data.error.message });
-    const ids = data.items.map(i => i.id.videoId).join(',');
-    const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics,contentDetails&id=${ids}&key=${YT_KEY}`;
-    const statsRes = await fetch(statsUrl);
-    const statsData = await statsRes.json();
-    const statsMap = {};
-    (statsData.items || []).forEach(v => { statsMap[v.id] = v; });
-    const results = data.items.map(item => {
+    const ids = (data.items || []).map(i => i.id.videoId).filter(Boolean).join(',');
+    // stats/duration lookup is a second API call — skip if there are no items to avoid an empty-id URL
+    let statsMap = {};
+    if (ids) {
+      const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics,contentDetails&id=${ids}&key=${YT_KEY}`;
+      const statsRes = await fetch(statsUrl);
+      const statsData = await statsRes.json();
+      (statsData.items || []).forEach(v => { statsMap[v.id] = v; });
+    }
+    const results = (data.items || []).map(item => {
       const vid = item.id.videoId;
       const stats = statsMap[vid] || {};
       const views = parseInt(stats.statistics?.viewCount || 0);
@@ -956,7 +965,9 @@ app.get('/api/search', async (req, res) => {
         url: `https://www.youtube.com/watch?v=${vid}`,
       };
     });
-    res.json({ ok: true, results, total: results.length });
+    // nextPageToken is what the frontend passes back on the next call to get more results;
+    // it's null/absent when there are no more pages, which the frontend uses to hide "Load more".
+    res.json({ ok: true, results, total: results.length, nextPageToken: data.nextPageToken || null });
   } catch (err) {
     console.error('YouTube error:', err);
     res.status(500).json({ error: err.message });
