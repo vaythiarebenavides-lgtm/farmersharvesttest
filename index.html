@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Farmers Defense Content</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<style>
+:root {
+  --soil: #1a1208;
+  --bark: #2d2010;
+  --harvest: #c8a035;
+  --harvest-light: #f0cc6a;
+  --leaf: #4a7c3f;
+  --leaf-light: #6aaa5c;
+  --cream: #faf6ee;
+  --parchment: #f0e8d4;
+  --mist: #e8e0cc;
+  --text: #1a1208;
+  --text-mid: #5a4a2a;
+  --text-faint: #8a7a5a;
+  --sans: 'Inter', system-ui, sans-serif;
+  --serif: 'DM Serif Display', Georgia, serif;
+  --r: 10px;
+  --rl: 16px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--sans); background: var(--cream); color: var(--text); min-height: 100vh; font-size: 14px; }
+
+/* TOPBAR */
+.topbar { background: var(--soil); height: 58px; display: flex; align-items: center; padding: 0 2rem; gap: 16px; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(200,160,53,0.3); }
+.logo { display: flex; align-items: center; gap: 10px; color: var(--harvest); font-family: var(--serif); font-size: 20px; }
+.logo-icon { width: 32px; height: 32px; background: var(--harvest); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; color: var(--soil); }
+.topbar-sub { font-size: 11px; color: rgba(255,255,255,0.35); margin-left: 4px; }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.tbadge { font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 20px; background: rgba(200,160,53,0.15); color: var(--harvest); border: 1px solid rgba(200,160,53,0.3); }
+
+/* LAYOUT */
+.layout { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 58px); }
+
+/* SIDEBAR */
+.sidebar { background: var(--bark); padding: 1.5rem 1rem; display: flex; flex-direction: column; gap: 2px; border-right: 1px solid rgba(200,160,53,0.15); }
+.slbl { font-size: 10px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: rgba(200,160,53,0.5); padding: 10px 10px 4px; }
+.sitem { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: var(--r); color: rgba(255,255,255,0.5); font-size: 13px; cursor: pointer; text-decoration: none; transition: background 0.1s, color 0.1s; }
+.sitem:hover { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.8); }
+.sitem.active { background: rgba(200,160,53,0.15); color: var(--harvest); font-weight: 500; }
+.sitem i { width: 16px; text-align: center; font-size: 14px; }
+.sitem .ctag { margin-left: auto; font-size: 9px; font-weight: 600; padding: 2px 6px; border-radius: 20px; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.3); }
+.sspacer { flex: 1; }
+.sstatus { background: rgba(0,0,0,0.2); border-radius: var(--r); padding: 12px; border: 1px solid rgba(200,160,53,0.1); }
+.sstatus-title { font-size: 10px; font-weight: 600; color: rgba(200,160,53,0.5); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+.prow { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: rgba(255,255,255,0.4); }
+.pdot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--leaf-light); }
+
+/* MAIN */
+.main { padding: 2rem; overflow-y: auto; }
+
+/* HERO */
+.hero { background: linear-gradient(135deg, var(--soil) 0%, var(--bark) 100%); border-radius: var(--rl); padding: 2rem 2.5rem; margin-bottom: 1.5rem; position: relative; overflow: hidden; border: 1px solid rgba(200,160,53,0.2); }
+.hero::before { content: ''; position: absolute; top: -40px; right: -40px; width: 200px; height: 200px; background: radial-gradient(circle, rgba(200,160,53,0.15) 0%, transparent 70%); border-radius: 50%; }
+.hero-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--harvest); margin-bottom: 10px; }
+.hero-title { font-family: var(--serif); font-size: 26px; color: #fff; line-height: 1.2; margin-bottom: 8px; }
+.hero-title span { color: var(--harvest); }
+.hero-sub { font-size: 13px; color: rgba(255,255,255,0.5); max-width: 480px; line-height: 1.6; margin-bottom: 1.25rem; }
+.hero-search { display: flex; gap: 10px; max-width: 560px; }
+.search-wrap { flex: 1; display: flex; align-items: center; background: rgba(255,255,255,0.08); border: 1px solid rgba(200,160,53,0.3); border-radius: var(--r); padding: 0 14px; gap: 10px; transition: border-color 0.15s; }
+.search-wrap:focus-within { border-color: var(--harvest); }
+.search-wrap i { color: var(--harvest); font-size: 14px; }
+.search-wrap input { flex: 1; background: none; border: none; outline: none; font-family: var(--sans); font-size: 14px; color: #fff; padding: 12px 0; }
+.search-wrap input::placeholder { color: rgba(255,255,255,0.3); }
+.btn-harvest { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: var(--r); background: var(--harvest); color: var(--soil); font-family: var(--sans); font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: background 0.1s; white-space: nowrap; }
+.btn-harvest:hover { background: var(--harvest-light); }
+.btn-harvest:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* TIKTOK HARVEST BAR */
+.harvest-bar { margin-top: 1rem; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--r); padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.harvest-label { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.7); margin-bottom: 2px; }
+.harvest-sub { font-size: 11px; color: rgba(255,255,255,0.35); }
+.harvest-right { display: flex; align-items: center; gap: 10px; }
+.harvest-counter { font-size: 11px; color: rgba(200,160,53,0.7); }
+.btn-small { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--r); background: var(--harvest); color: var(--soil); font-size: 12px; font-weight: 600; border: none; cursor: pointer; }
+.btn-small:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* PLATFORM TABS */
+.platform-tabs { display: flex; gap: 6px; margin-bottom: 1rem; flex-wrap: wrap; }
+.ptab { display: flex; align-items: center; gap: 7px; padding: 9px 16px; border-radius: var(--r); font-size: 13px; font-weight: 500; cursor: pointer; border: 1px solid var(--mist); background: #fff; color: var(--text-mid); transition: all 0.1s; }
+.ptab:hover { border-color: var(--harvest); }
+.ptab.active { background: var(--soil); color: var(--harvest); border-color: var(--soil); }
+.ptab .pcount { font-size: 10px; padding: 1px 6px; border-radius: 20px; background: var(--mist); color: var(--text-mid); }
+.ptab.active .pcount { background: rgba(200,160,53,0.2); color: var(--harvest); }
+
+/* SECTION CARDS */
+.sc { background: #fff; border: 1px solid var(--mist); border-radius: var(--rl); margin-bottom: 1rem; overflow: hidden; }
+.sh { display: flex; align-items: center; justify-content: space-between; padding: 12px 1.25rem; border-bottom: 1px solid var(--mist); background: var(--parchment); }
+.sh-left { display: flex; align-items: center; gap: 8px; }
+.sh-left i { font-size: 13px; color: var(--text-faint); }
+.sh-label { font-size: 12px; font-weight: 600; color: var(--text-mid); text-transform: uppercase; letter-spacing: 0.5px; }
+.sh-count { font-size: 11px; color: var(--text-faint); background: var(--mist); padding: 2px 8px; border-radius: 20px; }
+.sb { padding: 1.25rem; }
+
+/* FILTERS */
+.filter-bar { display: flex; gap: 8px; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+.filter-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--mist); background: #fff; color: var(--text-mid); transition: all 0.1s; }
+.filter-btn:hover { border-color: var(--harvest); color: var(--harvest); }
+.filter-btn.active { background: var(--harvest); color: var(--soil); border-color: var(--harvest); font-weight: 600; }
+.filter-divider { width: 1px; height: 24px; background: var(--mist); margin: 0 4px; }
+.filter-select { padding: 6px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; border: 1px solid var(--mist); background: #fff; color: var(--text-mid); cursor: pointer; font-family: var(--sans); outline: none; }
+.filter-select:disabled { opacity: 0.4; cursor: not-allowed; background: var(--parchment); }
+.date-input { padding: 5px 10px; border-radius: 20px; font-size: 12px; border: 1px solid var(--mist); background: #fff; color: var(--text-mid); font-family: var(--sans); outline: none; cursor: pointer; }
+.date-label { font-size: 11px; color: var(--text-faint); }
+
+/* RESULTS GRID */
+.results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.result-card { background: var(--cream); border: 1px solid var(--mist); border-radius: var(--r); overflow: hidden; transition: box-shadow 0.15s, transform 0.1s; cursor: pointer; position: relative; }
+.result-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.1); transform: translateY(-2px); }
+.result-card.has-rights { border-color: var(--leaf); box-shadow: 0 0 0 1px var(--leaf); }
+.result-thumb { width: 100%; aspect-ratio: 9/16; background: linear-gradient(135deg, var(--bark) 0%, var(--soil) 100%); display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+.result-thumb.landscape { aspect-ratio: 16/9; }
+.result-thumb img { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; }
+.result-thumb-placeholder { display: flex; flex-direction: column; align-items: center; gap: 8px; color: rgba(200,160,53,0.4); z-index: 1; }
+.result-thumb-placeholder i { font-size: 28px; }
+.result-thumb-placeholder span { font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; }
+.result-platform-badge { position: absolute; top: 8px; left: 8px; width: 26px; height: 26px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 12px; background: rgba(0,0,0,0.65); z-index: 2; }
+.result-platform-badge.yt { color: #ff4444; }
+.result-platform-badge.tt { color: #fff; }
+.result-platform-badge.ig { color: #e1306c; }
+.result-platform-badge.fb { color: #4a9eff; }
+.result-rights-badge { position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 11px; background: var(--leaf); color: #fff; z-index: 2; }
+.result-play-btn { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 44px; height: 44px; border-radius: 50%; background: rgba(200,160,53,0.92); color: var(--soil); display: flex; align-items: center; justify-content: center; font-size: 16px; opacity: 0; transition: opacity 0.15s; border: none; cursor: pointer; padding-left: 3px; z-index: 2; }
+.result-card:hover .result-play-btn { opacity: 1; }
+.result-rights-toggle { position: absolute; bottom: 8px; right: 8px; width: 30px; height: 30px; border-radius: 8px; background: rgba(255,255,255,0.92); color: var(--text-mid); display: flex; align-items: center; justify-content: center; font-size: 13px; opacity: 0; transition: opacity 0.15s, background 0.1s, color 0.1s; cursor: pointer; border: none; z-index: 2; }
+.result-card:hover .result-rights-toggle { opacity: 1; }
+.result-rights-toggle.checked { opacity: 1; background: var(--leaf); color: #fff; }
+.result-info { padding: 10px 12px; }
+.result-title { font-size: 12px; font-weight: 500; color: var(--text); margin-bottom: 4px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.result-meta { display: flex; align-items: center; justify-content: space-between; }
+.result-views { font-size: 11px; color: var(--text-faint); }
+.result-creator { font-size: 11px; color: var(--harvest); font-weight: 500; }
+.result-date { font-size: 10px; color: var(--text-faint); margin-top: 3px; }
+
+/* VIDEO MODAL */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 1000; display: none; align-items: center; justify-content: center; padding: 20px; }
+.modal-overlay.show { display: flex; }
+.modal { background: var(--soil); border-radius: var(--rl); overflow: hidden; width: 100%; max-width: 480px; border: 1px solid rgba(200,160,53,0.2); max-height: 90vh; display: flex; flex-direction: column; }
+.modal.wide { max-width: 800px; }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid rgba(200,160,53,0.1); flex-shrink: 0; }
+.modal-title { font-size: 14px; font-weight: 500; color: #fff; flex: 1; margin-right: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.modal-close { width: 30px; height: 30px; border-radius: 8px; background: rgba(255,255,255,0.08); border: none; color: rgba(255,255,255,0.6); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+.modal-close:hover { background: rgba(255,255,255,0.14); color: #fff; }
+.modal-video { width: 100%; flex: 1; background: #000; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.3); font-size: 13px; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 200px; }
+.modal-video i { font-size: 36px; color: rgba(200,160,53,0.4); }
+.modal-video iframe { width: 100%; border: none; display: block; }
+.modal-footer { padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid rgba(200,160,53,0.1); flex-wrap: wrap; gap: 10px; flex-shrink: 0; }
+.modal-meta { font-size: 12px; color: rgba(255,255,255,0.4); }
+.modal-meta span { color: var(--harvest); font-weight: 500; }
+.btn-rights { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--r); background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.7); font-size: 12px; font-weight: 600; border: 1px solid rgba(255,255,255,0.15); cursor: pointer; }
+.btn-rights.checked { background: var(--leaf); color: #fff; border-color: var(--leaf); }
+.btn-open { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--r); background: var(--harvest); color: var(--soil); font-size: 12px; font-weight: 600; border: none; cursor: pointer; text-decoration: none; }
+
+/* EMPTY STATE */
+.empty-state { text-align: center; padding: 3rem 2rem; color: var(--text-faint); }
+.empty-icon { width: 56px; height: 56px; background: var(--parchment); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; font-size: 22px; color: var(--harvest); }
+.empty-title { font-size: 15px; font-weight: 600; color: var(--text-mid); margin-bottom: 6px; }
+.empty-sub { font-size: 13px; color: var(--text-faint); line-height: 1.5; max-width: 340px; margin: 0 auto; }
+
+/* STATS */
+.stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 1.5rem; }
+.stat-card { background: #fff; border: 1px solid var(--mist); border-radius: var(--r); padding: 14px 16px; }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--text); line-height: 1; margin-bottom: 4px; }
+.stat-num span { color: var(--harvest); }
+.stat-num.rights-color span { color: var(--leaf); }
+.stat-lbl { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">
+    <div class="logo-icon"><i class="fa-solid fa-seedling"></i></div>
+    Farmers Defense Content
+  </div>
+  <span class="topbar-sub">UGC Discovery</span>
+  <div class="topbar-right">
+    <span class="tbadge">Farmers Defense</span>
+  </div>
+</div>
+
+<div class="layout">
+<div class="sidebar">
+  <div class="slbl">Navigation</div>
+  <a class="sitem active" href="#"><i class="fa-solid fa-magnifying-glass"></i> Search Content</a>
+  <a class="sitem" href="#" onclick="setFilter(document.querySelector('.filter-btn'),'rights');return false"><i class="fa-solid fa-shield-halved"></i> Usage Rights <span class="ctag" id="sideRightsCount">0</span></a>
+
+  <div class="slbl" style="margin-top:8px">Platforms</div>
+  <a class="sitem active" id="all-nav" href="#" onclick="setPlatform('all',this)"><i class="fa-solid fa-grip"></i> All Platforms</a>
+  <a class="sitem" id="yt-nav" href="#" onclick="setPlatform('yt',this)"><i class="fa-brands fa-youtube" style="color:#ff4444"></i> YouTube</a>
+  <a class="sitem" id="tt-nav" href="#" onclick="setPlatform('tt',this)"><i class="fa-brands fa-tiktok" style="color:#fff"></i> TikTok</a>
+  <a class="sitem" id="ig-nav" href="#" onclick="setPlatform('ig',this)"><i class="fa-brands fa-instagram" style="color:#e1306c"></i> Instagram</a>
+  <a class="sitem" id="fb-nav" href="#" onclick="setPlatform('fb',this)"><i class="fa-brands fa-facebook" style="color:#4a9eff"></i> Facebook</a>
+
+  <div class="sspacer"></div>
+
+  <div class="sstatus">
+    <div class="sstatus-title">API Status</div>
+    <div class="prow"><div class="pdot"></div> YouTube — Connected</div>
+    <div class="prow"><div class="pdot"></div> TikTok — Auto-harvest</div>
+    <div class="prow"><div class="pdot"></div> Instagram — Connected</div>
+    <div class="prow"><div class="pdot"></div> Facebook — Connected</div>
+  </div>
+</div>
+
+<div class="main">
+
+  <div class="hero">
+    <div class="hero-eyebrow"><i class="fa-solid fa-seedling"></i> &nbsp;Farmers Defense Content</div>
+    <div class="hero-title">Find every piece of content<br>about <span>Farmers Defense</span></div>
+    <div class="hero-sub">Search hashtags and keywords across platforms. Watch content inline and mark what you have usage rights for.</div>
+    <div class="hero-search">
+      <div class="search-wrap">
+        <i class="fa-solid fa-hashtag"></i>
+        <input type="text" id="searchInput" placeholder="farmersdefense, UV protection, garden gloves...">
+      </div>
+      <button class="btn-harvest" onclick="runSearch()"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
+    </div>
+
+    <div class="harvest-bar">
+      <div>
+        <div class="harvest-label"><i class="fa-solid fa-globe"></i> &nbsp;Search All Platforms</div>
+        <div class="harvest-sub" id="harvestStatus">Searches TikTok, Instagram, and Facebook for new Farmers Defense content</div>
+      </div>
+      <div class="harvest-right">
+        <div class="harvest-counter" id="harvestCounter">Checking availability...</div>
+        <button id="harvestBtn" class="btn-small" onclick="triggerHarvestAll()" disabled><i class="fa-solid fa-globe"></i> Search All Platforms</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Small admin utility — one-time backfill of thumbnails for rows harvested before
+       the thumbnail column existed. TikTok uses free oEmbed; Instagram and Facebook use
+       free og:image meta-tag extraction. No Apify credits consumed. Kept small/muted so
+       it doesn't distract from the main UI. -->
+  <div style="text-align: right; margin: 6px 4px 0; font-size: 11px;">
+    <button id="backfillBtn" onclick="runBackfill()" style="background: transparent; border: 1px solid rgba(200,160,53,0.3); color: rgba(200,160,53,0.7); padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: inherit;">
+      <i class="fa-solid fa-image"></i> Backfill missing thumbnails
+    </button>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="stat-num" id="statResults">0</div><div class="stat-lbl">Results found</div></div>
+    <div class="stat-card"><div class="stat-num rights-color" id="statRights"><span>0</span></div><div class="stat-lbl">Usage rights confirmed</div></div>
+    <div class="stat-card"><div class="stat-num" id="statTikTok">0</div><div class="stat-lbl">TikTok harvested</div></div>
+    <div class="stat-card"><div class="stat-num"><span>4</span></div><div class="stat-lbl">Platforms active</div></div>
+  </div>
+
+  <div class="sc">
+    <div class="sh">
+      <div class="sh-left"><i class="fa-solid fa-film"></i><span class="sh-label">Search results</span></div>
+      <span class="sh-count" id="resultsCount">0 results</span>
+    </div>
+    <div class="sb">
+
+      <div class="platform-tabs">
+        <div class="ptab active" id="tab-all" onclick="setPlatform('all',null)"><i class="fa-solid fa-grip"></i> All <span class="pcount" id="count-all">0</span></div>
+        <div class="ptab" id="tab-yt" onclick="setPlatform('yt',null)" style="color:#ff4444"><i class="fa-brands fa-youtube"></i> YouTube <span class="pcount" id="count-yt">0</span></div>
+        <div class="ptab" id="tab-tt" onclick="setPlatform('tt',null)"><i class="fa-brands fa-tiktok"></i> TikTok <span class="pcount" id="count-tt">0</span></div>
+        <div class="ptab" id="tab-ig" onclick="setPlatform('ig',null)" style="color:#e1306c"><i class="fa-brands fa-instagram"></i> Instagram <span class="pcount" id="count-ig">0</span></div>
+        <div class="ptab" id="tab-fb" onclick="setPlatform('fb',null)" style="color:#4a9eff"><i class="fa-brands fa-facebook"></i> Facebook <span class="pcount" id="count-fb">0</span></div>
+      </div>
+
+      <div class="filter-bar">
+        <button class="filter-btn active" onclick="setFilter(this,'all')">All</button>
+        <button class="filter-btn" onclick="setFilter(this,'rights')"><i class="fa-solid fa-shield-halved"></i> Usage rights only</button>
+        <button class="filter-btn" onclick="setFilter(this,'popular')"><i class="fa-solid fa-fire"></i> Most popular</button>
+        <button class="filter-btn" onclick="setFilter(this,'recent')"><i class="fa-regular fa-clock"></i> Most recent</button>
+        <div class="filter-divider"></div>
+        <select class="filter-select" id="productFilter" onchange="applyFilters()">
+          <option value="">All products</option>
+          <option>UV Crew neck</option>
+          <option>Sleeves</option>
+          <option>Sun Hats</option>
+          <option>Venture Hats</option>
+          <option>Gloves</option>
+          <option>Nitrile Gloves</option>
+          <option>UV Hoodie</option>
+          <option>UV Zip Hoodie</option>
+          <option>Canvas Apron</option>
+          <option>Snap Back</option>
+          <option>Leg Sleeves</option>
+          <option>Winter Gloves</option>
+          <option>General Products</option>
+        </select>
+        <span class="date-label">From</span>
+        <input type="date" class="date-input" id="dateFrom" onchange="applyFilters()">
+        <span class="date-label">to</span>
+        <input type="date" class="date-input" id="dateTo" onchange="applyFilters()">
+      </div>
+
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon"><i class="fa-solid fa-seedling"></i></div>
+        <div class="empty-title">Ready to harvest</div>
+        <div class="empty-sub">Type a hashtag or keyword above and hit Search to find content featuring Farmers Defense products.</div>
+      </div>
+
+      <div class="results-grid" id="resultsGrid" style="display:none"></div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- VIDEO MODAL -->
+<div class="modal-overlay" id="videoModal">
+  <div class="modal" id="modalBox">
+    <div class="modal-header">
+      <div class="modal-title" id="modalTitle">Video title</div>
+      <button class="modal-close" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-video" id="modalVideo">
+      <i class="fa-solid fa-play-circle"></i>
+      <span>Loading...</span>
+    </div>
+    <div class="modal-footer">
+      <div class="modal-meta" id="modalMeta">by <span>@creator</span> · 0 views</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-rights" id="modalRightsBtn" onclick="toggleModalRights()"><i class="fa-solid fa-shield-halved"></i> Mark usage rights</button>
+        <a class="btn-open" id="modalOpenBtn" href="#" target="_blank"><i class="fa-solid fa-up-right-from-square"></i> Open original</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let searchResults = [];
+let activeFilter = 'all';
+let currentPlatform = 'all';
+let currentModalId = null;
+let usageRights = JSON.parse(localStorage.getItem('usageRights') || '{}');
+
+function showComingSoon(name){
+  alert(name+' integration is coming soon!');
+}
+
+function setPlatform(platform, navEl){
+  currentPlatform = platform;
+  ['all','yt','tt','ig','fb'].forEach(p => {
+    const nav = document.getElementById(p+'-nav');
+    if(nav) nav.classList.toggle('active', p === platform);
+    const tab = document.getElementById('tab-'+p);
+    if(tab) tab.classList.toggle('active', p === platform);
+  });
+
+  // Product filter only applies to YouTube results — disable it visually on sheet-backed
+  // tabs rather than letting it silently filter out everything with no explanation.
+  const productFilterEl = document.getElementById('productFilter');
+  const isSheetBacked = platform === 'tt' || platform === 'ig' || platform === 'fb' || platform === 'all';
+  productFilterEl.disabled = isSheetBacked;
+  productFilterEl.title = isSheetBacked ? 'Product filter only applies to YouTube results' : '';
+
+  if(isSheetBacked){
+    // TikTok, Instagram, and Facebook all live in the same sheet now — load from there.
+    loadSheetResults();
+  } else if(searchResults.length > 0 || document.getElementById('searchInput').value.trim()){
+    runSearch();
+  }
+}
+
+function setFilter(btn, filter){
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  activeFilter = filter;
+  applyFilters();
+}
+
+function applyFilters(){
+  let filtered = [...searchResults];
+  if(currentPlatform !== 'all') filtered = filtered.filter(r => r.platform === currentPlatform);
+  if(activeFilter === 'rights') filtered = filtered.filter(r => usageRights[r.id]);
+  else if(activeFilter === 'popular') filtered = [...filtered].sort((a,b) => (b.viewsNum||0) - (a.viewsNum||0));
+  else if(activeFilter === 'recent') filtered = [...filtered].sort((a,b) => new Date(b.date) - new Date(a.date));
+  // Sheet-backed platforms (TikTok/Instagram/Facebook/All) don't have product tags —
+  // only YouTube results do. Skip product filtering entirely for those rather than
+  // letting it silently filter everything out with no explanation.
+  const sheetBackedPlatform = currentPlatform === 'tt' || currentPlatform === 'ig' || currentPlatform === 'fb' || currentPlatform === 'all';
+  const prod = document.getElementById('productFilter').value;
+  if(prod && !sheetBackedPlatform) filtered = filtered.filter(r => r.product === prod);
+  const df = document.getElementById('dateFrom').value;
+  const dt = document.getElementById('dateTo').value;
+  if(df) filtered = filtered.filter(r => new Date(r.date) >= new Date(df));
+  if(dt) filtered = filtered.filter(r => new Date(r.date) <= new Date(dt));
+  renderResults(filtered);
+  updateCounts();
+}
+
+function updateCounts(){
+  ['yt','tt','ig','fb'].forEach(p => {
+    const c = searchResults.filter(r => r.platform === p).length;
+    const el = document.getElementById('count-'+p);
+    if(el) el.textContent = c;
+  });
+  document.getElementById('count-all').textContent = searchResults.length;
+  const rightsCount = Object.values(usageRights).filter(Boolean).length;
+  document.getElementById('statRights').innerHTML = '<span>'+rightsCount+'</span>';
+  document.getElementById('sideRightsCount').textContent = rightsCount;
+  document.getElementById('statTikTok').textContent = searchResults.filter(r=>r.platform==='tt').length;
+}
+
+async function runSearch(){
+  const query = document.getElementById('searchInput').value.trim();
+  if(!query) return;
+  document.getElementById('emptyState').style.display='none';
+  document.getElementById('resultsGrid').style.display='none';
+  const btn = document.querySelector('.btn-harvest');
+  btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Searching...';
+  btn.disabled=true;
+
+  try {
+    if(currentPlatform === 'tt' || currentPlatform === 'ig' || currentPlatform === 'fb' || currentPlatform === 'all'){
+      // These platforms are read from the Google Sheet, not searched live — the sheet
+      // only updates when "Search All Platforms" is run (subject to its 7-day cooldown).
+      // Typing in the search box and hitting Search on these tabs just re-reads the
+      // current sheet contents rather than triggering a new live search.
+      await loadSheetResults();
+    } else {
+      const order = activeFilter==='popular'?'viewCount':activeFilter==='recent'?'date':'relevance';
+      const df = document.getElementById('dateFrom').value;
+      const dt = document.getElementById('dateTo').value;
+      let url = `/api/search?query=${encodeURIComponent(query)}&maxResults=12&order=${order}`;
+      if(df) url += `&publishedAfter=${df}`;
+      if(dt) url += `&publishedBefore=${dt}`;
+      const r = await fetch(url);
+      const d = await r.json();
+      if(d.ok){ searchResults = d.results; finishSearch(); }
+      else throw new Error(d.error);
+    }
+  } catch(err) {
+    console.error(err);
+    document.getElementById('emptyState').style.display='block';
+    document.getElementById('emptyState').querySelector('.empty-title').textContent='Search failed';
+    document.getElementById('emptyState').querySelector('.empty-sub').textContent=err.message;
+  }
+
+  btn.innerHTML='<i class="fa-solid fa-magnifying-glass"></i> Search';
+  btn.disabled=false;
+}
+
+function finishSearch(){
+  document.getElementById('statResults').textContent = searchResults.length;
+  document.getElementById('resultsCount').textContent = searchResults.length + ' results';
+  applyFilters();
+}
+
+function parseViews(viewStr){
+  if(!viewStr || viewStr === 'N/A') return 0;
+  const s = viewStr.toString().toUpperCase();
+  const num = parseFloat(s);
+  if(s.includes('M')) return num * 1000000;
+  if(s.includes('K')) return num * 1000;
+  return num || 0;
+}
+
+function renderResults(filtered){
+  const grid=document.getElementById('resultsGrid');
+  if(!filtered||filtered.length===0){
+    grid.style.display='none';
+    document.getElementById('emptyState').style.display='block';
+    return;
+  }
+  document.getElementById('emptyState').style.display='none';
+  grid.style.display='grid';
+  grid.innerHTML=filtered.map(r=>{
+    const platformIcon = r.platform==='yt'?'youtube':r.platform==='tt'?'tiktok':r.platform==='ig'?'instagram':'facebook';
+    const hasRights = !!usageRights[r.id];
+    const thumbContent = r.thumb
+      ? `<img src="${r.thumb}" referrerpolicy="no-referrer" onerror="this.style.display='none'">`
+      : `<div class="result-thumb-placeholder"><i class="fa-brands fa-${platformIcon}"></i><span>${r.platform.toUpperCase()}</span></div>`;
+    return `
+    <div class="result-card ${hasRights?'has-rights':''}" onclick="openModal('${r.id}')">
+      <div class="result-thumb ${r.type==='video'?'landscape':''}">
+        ${thumbContent}
+        <div class="result-platform-badge ${r.platform}"><i class="fa-brands fa-${platformIcon}"></i></div>
+        ${hasRights ? '<div class="result-rights-badge"><i class="fa-solid fa-check"></i></div>' : ''}
+        <button class="result-play-btn" onclick="event.stopPropagation();openModal('${r.id}')"><i class="fa-solid fa-play"></i></button>
+        <button class="result-rights-toggle ${hasRights?'checked':''}" onclick="event.stopPropagation();toggleRights('${r.id}')" title="Mark usage rights">
+          <i class="fa-solid fa-shield-halved"></i>
+        </button>
+      </div>
+      <div class="result-info">
+        <div class="result-title">${r.title}</div>
+        <div class="result-meta">
+          <span class="result-creator">${r.creator}</span>
+          <span class="result-views"><i class="fa-solid fa-eye" style="font-size:10px"></i> ${r.views}</span>
+        </div>
+        <div class="result-date"><i class="fa-regular fa-calendar" style="font-size:10px"></i> ${r.date}</div>
+      </div>
+    </div>
+  `}).join('');
+}
+
+function toggleRights(id){
+  usageRights[id] = !usageRights[id];
+  localStorage.setItem('usageRights', JSON.stringify(usageRights));
+  applyFilters();
+
+  // If this item came from the sheet (has a rowIndex), sync the change back
+  const item = searchResults.find(r => r.id === id);
+  if(item && item.rowIndex){
+    fetch('/api/sheet-update-rights', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ rowIndex: item.rowIndex, usageRights: usageRights[id] })
+    }).catch(err => console.error('Failed to sync usage rights to sheet:', err));
+  }
+}
+
+function toggleModalRights(){
+  if(!currentModalId) return;
+  toggleRights(currentModalId);
+  const btn = document.getElementById('modalRightsBtn');
+  const has = !!usageRights[currentModalId];
+  btn.classList.toggle('checked', has);
+  btn.innerHTML = has ? '<i class="fa-solid fa-check"></i> Usage rights confirmed' : '<i class="fa-solid fa-shield-halved"></i> Mark usage rights';
+}
+
+async function openModal(id){
+  const item = searchResults.find(r => r.id === id);
+  if(!item) return;
+  currentModalId = id;
+  document.getElementById('modalTitle').textContent = item.title;
+  document.getElementById('modalMeta').innerHTML = 'by <span>'+item.creator+'</span> · '+item.views+' views · '+item.date;
+  document.getElementById('modalOpenBtn').href = item.url || '#';
+
+  const hasRights = !!usageRights[id];
+  const rightsBtn = document.getElementById('modalRightsBtn');
+  rightsBtn.classList.toggle('checked', hasRights);
+  rightsBtn.innerHTML = hasRights ? '<i class="fa-solid fa-check"></i> Usage rights confirmed' : '<i class="fa-solid fa-shield-halved"></i> Mark usage rights';
+
+  const mv = document.getElementById('modalVideo');
+  const modalBox = document.getElementById('modalBox');
+
+  if(item.platform === 'yt' && item.ytId){
+    modalBox.classList.add('wide');
+    mv.innerHTML = `<iframe width="100%" height="450" src="https://www.youtube.com/embed/${item.ytId}?autoplay=1" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+  } else if(item.platform === 'tt' && item.url){
+    modalBox.classList.remove('wide');
+    mv.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Loading TikTok preview...</span>';
+    try {
+      const r = await fetch('/api/tiktok-embed?url=' + encodeURIComponent(item.url));
+      const d = await r.json();
+      if(d.html){
+        mv.innerHTML = d.html;
+        // Load TikTok embed script
+        if(!document.getElementById('tiktok-embed-script')){
+          const s = document.createElement('script');
+          s.id = 'tiktok-embed-script';
+          s.src = 'https://www.tiktok.com/embed.js';
+          document.body.appendChild(s);
+        } else {
+          // Re-trigger embed processing
+          const s = document.createElement('script');
+          s.src = 'https://www.tiktok.com/embed.js';
+          document.body.appendChild(s);
+        }
+      } else {
+        throw new Error('No embed available');
+      }
+    } catch(err) {
+      mv.innerHTML = '<i class="fa-brands fa-tiktok"></i><span>Preview not available — click Open Original to watch on TikTok</span>';
+    }
+  } else {
+    modalBox.classList.remove('wide');
+    mv.innerHTML = '<i class="fa-brands fa-' + (item.platform==='ig'?'instagram':'facebook') + '"></i><span>Click Open Original to view on ' + (item.platform==='ig'?'Instagram':'Facebook') + '</span>';
+  }
+
+  document.getElementById('videoModal').classList.add('show');
+}
+
+function closeModal(){
+  document.getElementById('videoModal').classList.remove('show');
+  document.getElementById('modalVideo').innerHTML = '';
+  document.getElementById('modalBox').classList.remove('wide');
+  currentModalId = null;
+}
+
+document.getElementById('videoModal').addEventListener('click', function(e){ if(e.target === this) closeModal(); });
+document.getElementById('searchInput').addEventListener('keydown', e => { if(e.key === 'Enter') runSearch(); });
+
+// SEARCH ALL PLATFORMS — cooldown is enforced server-side (stored in the sheet itself),
+// so it's consistent for anyone using the app, not just the browser that clicked the button.
+// On page load we ask the server what the real status is rather than guessing locally.
+let harvestPollInterval = null;
+
+async function refreshHarvestStatus(){
+  const counter = document.getElementById('harvestCounter');
+  const btn = document.getElementById('harvestBtn');
+  try{
+    const r = await fetch('/api/harvest-status');
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error || 'Could not check status');
+
+    if(d.canRunNow){
+      counter.textContent = d.lastRun ? 'Ready · last run ' + new Date(d.lastRun).toLocaleDateString() : 'Ready · never run yet';
+      btn.disabled = false;
+    } else {
+      counter.textContent = 'Available again in ' + d.remainingDays + ' day' + (d.remainingDays !== 1 ? 's' : '');
+      btn.disabled = true;
+    }
+  } catch(err){
+    console.error('Could not check harvest status:', err);
+    counter.textContent = 'Status unavailable';
+    btn.disabled = false; // fail open — let the server itself reject the request if the cooldown is genuinely still active, rather than permanently locking the button over a transient status-check failure
+  }
+}
+
+async function triggerHarvestAll(){
+  const btn = document.getElementById('harvestBtn');
+  const status = document.getElementById('harvestStatus');
+
+  const confirmed = confirm('This will search TikTok, Instagram, and Facebook for new Farmers Defense content.\n\nThis uses paid search credits (currently a tiny fraction of a cent per run). The search itself takes a few minutes to complete.\n\nContinue?');
+  if(!confirmed) return;
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Starting...';
+  status.textContent = 'Starting search across all platforms...';
+
+  try {
+    const r = await fetch('/api/harvest-all', { method: 'POST' });
+    const d = await r.json();
+
+    if(r.status === 429){
+      // Cooldown rejected us server-side even though our local check said it was fine —
+      // this can happen if someone else triggered a run in between, or our status
+      // check was stale. Refresh the real status rather than just showing a generic error.
+      status.textContent = d.error;
+      btn.innerHTML = '<i class="fa-solid fa-globe"></i> Search All Platforms';
+      await refreshHarvestStatus();
+      return;
+    }
+
+    if(!d.ok) throw new Error(d.error || 'Could not start harvest');
+
+    status.textContent = 'Searching... this takes a few minutes. You can keep using the app while this runs.';
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Searching...';
+
+    // Poll for job completion every 8 seconds. This polling traffic also keeps the
+    // server "awake" on hosts that spin down idle instances after inactivity.
+    if(harvestPollInterval) clearInterval(harvestPollInterval);
+    harvestPollInterval = setInterval(pollHarvestJob, 8000);
+    pollHarvestJob(); // check immediately too, don't wait the full 8s for the first check
+
+  } catch(err) {
+    status.textContent = 'Error: ' + err.message;
+    btn.innerHTML = '<i class="fa-solid fa-globe"></i> Search All Platforms';
+    await refreshHarvestStatus();
+  }
+}
+
+async function pollHarvestJob(){
+  const btn = document.getElementById('harvestBtn');
+  const status = document.getElementById('harvestStatus');
+
+  try {
+    const r = await fetch('/api/harvest-job-status');
+    const job = await r.json();
+
+    if(job.status === 'running'){
+      const elapsedSec = Math.floor((Date.now() - job.startedAt) / 1000);
+      status.textContent = 'Still searching... (' + elapsedSec + 's elapsed)';
+      return; // keep polling
+    }
+
+    // Job finished one way or another — stop polling
+    if(harvestPollInterval){ clearInterval(harvestPollInterval); harvestPollInterval = null; }
+    btn.innerHTML = '<i class="fa-solid fa-globe"></i> Search All Platforms';
+
+    if(job.status === 'done' && job.result){
+      const res = job.result;
+      const parts = [];
+      if(res.platforms?.tiktok) parts.push('TikTok: ' + (res.platforms.tiktok.ok ? res.platforms.tiktok.count + ' found' : 'failed'));
+      if(res.platforms?.instagram) parts.push('Instagram: ' + (res.platforms.instagram.ok ? res.platforms.instagram.count + ' found' : 'failed'));
+      if(res.platforms?.googleSearch) parts.push('Facebook/IG search: ' + (res.platforms.googleSearch.ok ? res.platforms.googleSearch.count + ' found' : 'failed'));
+      status.textContent = '✓ Done! Added ' + res.added + ' new item' + (res.added !== 1 ? 's' : '') + ' to the sheet. (' + parts.join(' · ') + ')';
+
+      // Refresh whichever platform tab is currently active so new results show immediately.
+      // TikTok, Instagram, Facebook, and "All" are all backed by the sheet now.
+      if(currentPlatform === 'tt' || currentPlatform === 'ig' || currentPlatform === 'fb' || currentPlatform === 'all'){
+        loadSheetResults();
+      }
+    } else if(job.status === 'error'){
+      status.textContent = 'Harvest failed: ' + (job.error || 'Unknown error');
+    }
+
+    await refreshHarvestStatus(); // update the cooldown display now that a run just happened
+  } catch(err){
+    console.error('Error polling harvest job:', err);
+    // Don't stop polling on a single failed poll attempt — could be a transient
+    // network blip while the long-running job is still genuinely in progress on the server.
+  }
+}
+
+// Check real cooldown status on page load
+refreshHarvestStatus();
+
+// Maps the sheet's actual Platform column text to our internal short codes used
+// throughout the UI (tab IDs, filter logic, badge icons, etc.)
+function platformTextToCode(platformText){
+  const p = (platformText || '').toLowerCase();
+  if(p === 'tiktok') return 'tt';
+  if(p === 'instagram') return 'ig';
+  if(p === 'facebook') return 'fb';
+  return 'unknown';
+}
+
+// Loads ALL rows from the sheet (TikTok + Instagram + Facebook together), tagging each
+// with its real platform from the sheet's Platform column rather than assuming one
+// platform for every row — this was the bug that made Instagram/Facebook tabs show
+// stale hardcoded demo data instead of the genuinely scraped sheet content.
+// Called by the small "Backfill missing thumbnails" button. Sends up to 100 rows through
+// the backfill endpoint per click, then shows a summary. If more remain, the user just
+// clicks the button again — the endpoint only touches rows whose thumbnail cell is still
+// empty, so it picks up where the previous batch left off automatically.
+async function runBackfill(){
+  const btn = document.getElementById('backfillBtn');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Backfilling (up to a minute)...';
+  try {
+    const r = await fetch('/api/backfill-thumbs', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      const parts = [];
+      if (d.byPlatform.tiktok) parts.push(`${d.byPlatform.tiktok} TikTok`);
+      if (d.byPlatform.instagram) parts.push(`${d.byPlatform.instagram} Instagram`);
+      if (d.byPlatform.facebook) parts.push(`${d.byPlatform.facebook} Facebook`);
+      let msg = parts.length
+        ? `Added thumbnails: ${parts.join(', ')}.`
+        : 'No new thumbnails found in this batch.';
+      if (d.creatorsFixed) msg += `\n\nFixed ${d.creatorsFixed} garbled creator names (e.g. @p, @reel, @groups → real handle or "Unknown").`;
+      if (d.failed) msg += `\n\n${d.failed} rows had no thumbnail available (usually login-walled Facebook posts or expired Instagram links) — they'll stay as placeholders.`;
+      if (d.remaining > 0) msg += `\n\n${d.remaining} rows still to check — click the button again to continue.`;
+      else if (d.updated > 0 || d.creatorsFixed) msg += '\n\nAll done!';
+      alert(msg);
+      loadSheetResults(); // reload grid so new thumbs appear immediately
+    } else {
+      alert('Backfill failed: ' + (d.error || 'unknown error'));
+    }
+  } catch (e) {
+    alert('Backfill failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.innerHTML = orig;
+  }
+}
+
+async function loadSheetResults(){
+  try{
+    const r = await fetch('/api/sheet-data?t=' + Date.now());
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error || 'No results yet');
+
+    searchResults = d.data.map(item => {
+      const platformCode = platformTextToCode(item.platform);
+      // Thumbnails are loaded directly by the browser (not through our server proxy).
+      // Instagram and Facebook CDN URLs are signed with tokens tied to the requester's
+      // IP address — a server-side proxy on Render always got 403 no matter what
+      // headers we sent. The browser, with referrerpolicy="no-referrer" set on the
+      // <img> tag, loads them successfully because it's a normal residential IP
+      // and no referrer means IG/FB can't detect it as unauthorized hotlinking.
+      // Caveat: IG/FB URLs expire ~24-48h after harvest. Fresh runs get fresh URLs.
+      return {
+        id: 'row-' + item.rowIndex,
+        rowIndex: item.rowIndex,
+        title: item.title,
+        creator: item.creator,
+        url: item.url,
+        views: item.views || 'N/A',
+        viewsNum: parseViews(item.views),
+        date: item.date,
+        platform: platformCode,
+        type: 'short',
+        thumb: item.thumb || null,
+      };
+    });
+
+    // Sync usage rights from sheet into local state too
+    d.data.forEach(item => {
+      if(item.usageRights) usageRights['row-' + item.rowIndex] = true;
+    });
+
+    finishSearch();
+  }catch(err){
+    searchResults = [];
+    document.getElementById('emptyState').style.display='block';
+    document.getElementById('emptyState').querySelector('.empty-title').textContent='No results yet';
+    document.getElementById('emptyState').querySelector('.empty-sub').textContent='Press "Search All Platforms" above to search for content. This can take a few minutes to complete.';
+    document.getElementById('resultsGrid').style.display='none';
+    updateCounts();
+  }
+}
+
+updateCounts();
+</script>
+</body>
+</html>
