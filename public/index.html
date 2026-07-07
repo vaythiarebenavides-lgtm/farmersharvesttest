@@ -133,6 +133,13 @@ body { font-family: var(--sans); background: var(--cream); color: var(--text); m
 .result-rights-toggle { position: absolute; bottom: 8px; right: 8px; width: 30px; height: 30px; border-radius: 8px; background: rgba(255,255,255,0.92); color: var(--text-mid); display: flex; align-items: center; justify-content: center; font-size: 13px; opacity: 0; transition: opacity 0.15s, background 0.1s, color 0.1s; cursor: pointer; border: none; z-index: 2; }
 .result-card:hover .result-rights-toggle { opacity: 1; }
 .result-rights-toggle.checked { opacity: 1; background: var(--leaf); color: #fff; }
+/* Delete button — bottom-LEFT corner (mirroring the rights toggle on the right).
+   Hover-only so it doesn't distract when browsing normally, but discoverable when the
+   user actively wants to prune noise. Requires confirm() so accidental clicks don't
+   nuke rows. Not rendered at all on YouTube cards (no sheet row to delete). */
+.result-delete-btn { position: absolute; bottom: 8px; left: 8px; width: 30px; height: 30px; border-radius: 8px; background: rgba(220,53,69,0.9); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; opacity: 0; transition: opacity 0.15s, background 0.1s; cursor: pointer; border: none; z-index: 2; }
+.result-card:hover .result-delete-btn { opacity: 1; }
+.result-delete-btn:hover { background: rgba(180,40,55,1); }
 .result-info { padding: 10px 12px; }
 .result-title { font-size: 12px; font-weight: 500; color: var(--text); margin-bottom: 4px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .result-meta { display: flex; align-items: center; justify-content: space-between; }
@@ -564,6 +571,7 @@ function renderResults(filtered){
         <button class="result-rights-toggle ${hasRights?'checked':''}" onclick="event.stopPropagation();toggleRights('${r.id}')" title="Mark usage rights">
           <i class="fa-solid fa-shield-halved"></i>
         </button>
+        ${r.rowIndex ? `<button class="result-delete-btn" onclick="event.stopPropagation();deletePost('${r.id}')" title="Remove this post (and block it from re-appearing)"><i class="fa-solid fa-xmark"></i></button>` : ''}
       </div>
       <div class="result-info">
         <div class="result-title">${r.title}</div>
@@ -590,6 +598,36 @@ function toggleRights(id){
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ rowIndex: item.rowIndex, usageRights: usageRights[id] })
     }).catch(err => console.error('Failed to sync usage rights to sheet:', err));
+  }
+}
+
+// Called by the red X button on a card. Requires confirmation, deletes the sheet row,
+// adds the URL to a server-side blocklist so it doesn't come back on the next harvest,
+// then reloads sheet data so the grid is in sync with the sheet's new row numbering.
+async function deletePost(id){
+  const item = searchResults.find(r => r.id === id);
+  if(!item || !item.rowIndex) return; // guard for YouTube cards which don't have rowIndex
+  const preview = (item.title || '').slice(0, 100).replace(/\n/g, ' ');
+  if(!confirm(`Remove this post permanently?\n\n"${preview}${item.title && item.title.length > 100 ? '...' : ''}"\n\nIt will be deleted from the sheet AND blocked from future harvests.`)){
+    return;
+  }
+  try {
+    const r = await fetch('/api/sheet-delete-row', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ rowIndex: item.rowIndex, url: item.url })
+    });
+    const d = await r.json();
+    if(d.ok){
+      // Row indexes shift when a row is deleted, so we can't just splice the array —
+      // easiest correct fix is to re-read the sheet, which gives every remaining
+      // card fresh, correct rowIndexes for future delete/rights actions.
+      loadSheetResults();
+    } else {
+      alert('Delete failed: ' + (d.error || 'unknown error'));
+    }
+  } catch(err) {
+    alert('Delete failed: ' + err.message);
   }
 }
 

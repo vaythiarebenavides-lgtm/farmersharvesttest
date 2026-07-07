@@ -138,6 +138,72 @@ app.post('/api/sheet-update-rights', async (req, res) => {
   }
 });
 
+// Delete a single sheet row (user clicked the red X on a card in the app) AND add
+// its URL to a blocklist so future harvests don't re-add it. Blocklist lives in
+// column L with a header at L1 — this keeps it out of the way of the main data
+// (cols A-I) and the cooldown timestamp (K1). The main harvest write-step reads
+// L2:L into its dedup Set so blocked URLs are treated the same as already-present ones.
+app.post('/api/sheet-delete-row', async (req, res) => {
+  try {
+    const { rowIndex, url } = req.body;
+    if (!rowIndex) return res.status(400).json({ error: 'rowIndex required' });
+
+    const auth = getGoogleAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+
+    // Deleting a row (as opposed to clearing its values) requires the numeric sheet ID,
+    // not the spreadsheet ID — those are different things. Look it up from the metadata.
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID });
+    const sheet = meta.data.sheets.find(s => s.properties.title === SHEET_NAME);
+    if (!sheet) return res.status(500).json({ error: `Tab "${SHEET_NAME}" not found` });
+    const sheetId = sheet.properties.sheetId;
+
+    // Delete the row. Google's dimension API uses 0-based indexes half-open [start, end),
+    // whereas the rowIndex from the frontend is 1-based. So sheet row 5 → startIndex 4, endIndex 5.
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SHEET_ID,
+      requestBody: {
+        requests: [{
+          deleteDimension: {
+            range: {
+              sheetId,
+              dimension: 'ROWS',
+              startIndex: rowIndex - 1,
+              endIndex: rowIndex,
+            },
+          },
+        }],
+      },
+    });
+
+    // Add URL to the blocklist so it doesn't get re-added by the next harvest.
+    // Ensure header at L1 first (idempotent) so appends land at L2 onwards.
+    if (url) {
+      const headerCheck = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `'${SHEET_NAME}'!L1` });
+      if (!headerCheck.data.values || headerCheck.data.values.length === 0) {
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SHEET_ID,
+          range: `'${SHEET_NAME}'!L1`,
+          valueInputOption: 'RAW',
+          requestBody: { values: [['Blocked URLs (auto)']] },
+        });
+      }
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SHEET_ID,
+        range: `'${SHEET_NAME}'!L:L`,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values: [[url]] },
+      });
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Sheet delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
@@ -371,10 +437,13 @@ function extractCreator(url, title) {
 }
 
 // ── RELEVANCE FILTER ──
-// Simple keyword-based check to cut out content that matched our broad search terms
-// coincidentally (e.g. news stories about farmers fighting bandits, bodybuilding videos)
-// without needing an AI API call. Not perfect — genuine edge cases can still slip through
-// either direction — but removes the most obvious noise we saw in the first real run.
+// Two-layer check on each scraped item's text before we save it to the sheet:
+//   1. Whitelist: must contain "farmers defense" (in some form) OR "defense" + a product word
+//   2. Noise blacklist: must NOT contain any known-unrelated phrase (football, disaster, etc.)
+// Without the noise layer, posts that use a Farmers Defense hashtag AND happen to be about
+// unrelated topics (football clips, flood victim news, cinema reviews) still slip through.
+// Not perfect — genuine edge cases can still slip either direction — but removes the most
+// obvious noise the whitelist alone lets through.
 const RELEVANT_PHRASES = [
   'farmers defense', 'farmersdefense', "farmer's defense", 'farmer\u2019s defense',
 ];
@@ -383,6 +452,30 @@ const PRODUCT_WORDS = [
   'snap back', 'leg sleeve',
 ];
 
+// Whole-word blocklist of topics that are clearly not Farmers Defense UGC. Uses \b
+// word boundaries so "fire" doesn't match "firefly" or "campfire", "war" doesn't
+// match "warm" or "warrior", etc. Add/remove entries here as new noise patterns show up.
+const NOISE_PHRASES = [
+  // Sports (unrelated to gardening/UV brand)
+  'football', 'nfl', 'nba', 'basketball', 'soccer', 'baseball',
+  // Fitness/other lifestyle content that keeps hijacking product hashtags
+  'bodybuilding', 'gym workout',
+  // Crypto/finance grifter content
+  'crypto', 'bitcoin', 'nft',
+  // News/disaster/violence — surfaces via "defense" or "farmer" keywords
+  'bandit', 'flood', 'disaster', 'fire', 'victim', 'killed', 'died', 'funeral',
+  'arrested', 'police', 'shooting', 'war', 'homicide', 'murder',
+  // Politics
+  'politics', 'election', 'president', 'senator',
+  // Country/region false positives we've seen in real runs
+  'nigeria', 'gomoa',
+  // Farm-adjacent but not gardening product content
+  'manure',
+  // Entertainment noise
+  'cinema', 'movie review', 'gaming', 'twitch',
+];
+const NOISE_REGEX = new RegExp('\\b(' + NOISE_PHRASES.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b', 'i');
+
 function isLikelyRelevant(text) {
   if (!text) return false;
   const lower = text.toLowerCase();
@@ -390,16 +483,29 @@ function isLikelyRelevant(text) {
   if (RELEVANT_PHRASES.some(phrase => lower.includes(phrase))) return true;
   // Weaker signal: mentions a specific product word AND the word "defense" together —
   // catches creators tagging @farmersdefense without spelling out the full brand name
-  // in the caption text itself
   if (lower.includes('defense') && PRODUCT_WORDS.some(w => lower.includes(w))) return true;
   return false;
 }
 
+function hasNoisePhrase(text) {
+  if (!text) return false;
+  return NOISE_REGEX.test(text);
+}
+
 function filterRelevant(rows, label) {
   const before = rows.length;
-  const filtered = rows.filter(r => isLikelyRelevant(r.title) || isLikelyRelevant(r.creator));
+  let filteredForNoise = 0;
+  const filtered = rows.filter(r => {
+    const relevant = isLikelyRelevant(r.title) || isLikelyRelevant(r.creator);
+    if (!relevant) return false;
+    if (hasNoisePhrase(r.title) || hasNoisePhrase(r.creator)) {
+      filteredForNoise++;
+      return false;
+    }
+    return true;
+  });
   const removed = before - filtered.length;
-  if (removed > 0) console.log(`[${label}] Relevance filter removed ${removed} of ${before} results`);
+  if (removed > 0) console.log(`[${label}] Filter removed ${removed} of ${before} (${filteredForNoise} for noise phrases)`);
   return filtered;
 }
 
@@ -575,6 +681,19 @@ async function runFullHarvest(sheets) {
     await ensureHeaders(sheets);
     const existing = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `'${SHEET_NAME}'!D:D` });
     const existingLinks = new Set((existing.data.values || []).map(r => r[0]));
+
+    // Merge in the blocklist from column L (populated when users click the red X on
+    // a card). Treat blocked URLs the same as already-present URLs — they get filtered
+    // out before write, so a deleted post can't be re-added by a future harvest. If
+    // the blocklist read fails for any reason we just fall back to regular dedup.
+    try {
+      const blocklist = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `'${SHEET_NAME}'!L2:L` });
+      const blockedRows = blocklist.data.values || [];
+      blockedRows.forEach(row => { if (row[0]) existingLinks.add(row[0]); });
+      if (blockedRows.length > 0) console.log(`[Sheet] Blocklist has ${blockedRows.length} URLs merged into dedup set`);
+    } catch (blockErr) {
+      console.error('[Sheet] Could not read blocklist (non-fatal):', blockErr.message);
+    }
 
     const rowsToAdd = allRows
       .filter(item => item.url && !existingLinks.has(item.url))
