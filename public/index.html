@@ -243,6 +243,16 @@ body { font-family: var(--sans); background: var(--cream); color: var(--text); m
     </div>
   </div>
 
+  <!-- Small admin utility — one-time backfill of thumbnails for rows harvested before
+       the thumbnail column existed. TikTok uses free oEmbed; Instagram and Facebook use
+       free og:image meta-tag extraction. No Apify credits consumed. Kept small/muted so
+       it doesn't distract from the main UI. -->
+  <div style="text-align: right; margin: 6px 4px 0; font-size: 11px;">
+    <button id="backfillBtn" onclick="runBackfill()" style="background: transparent; border: 1px solid rgba(200,160,53,0.3); color: rgba(200,160,53,0.7); padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: inherit;">
+      <i class="fa-solid fa-image"></i> Backfill missing thumbnails
+    </button>
+  </div>
+
   <div class="stats-row">
     <div class="stat-card"><div class="stat-num" id="statResults">0</div><div class="stat-lbl">Results found</div></div>
     <div class="stat-card"><div class="stat-num rights-color" id="statRights"><span>0</span></div><div class="stat-lbl">Usage rights confirmed</div></div>
@@ -712,6 +722,44 @@ function platformTextToCode(platformText){
 // with its real platform from the sheet's Platform column rather than assuming one
 // platform for every row — this was the bug that made Instagram/Facebook tabs show
 // stale hardcoded demo data instead of the genuinely scraped sheet content.
+// Called by the small "Backfill missing thumbnails" button. Sends up to 100 rows through
+// the backfill endpoint per click, then shows a summary. If more remain, the user just
+// clicks the button again — the endpoint only touches rows whose thumbnail cell is still
+// empty, so it picks up where the previous batch left off automatically.
+async function runBackfill(){
+  const btn = document.getElementById('backfillBtn');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Backfilling (up to a minute)...';
+  try {
+    const r = await fetch('/api/backfill-thumbs', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      const parts = [];
+      if (d.byPlatform.tiktok) parts.push(`${d.byPlatform.tiktok} TikTok`);
+      if (d.byPlatform.instagram) parts.push(`${d.byPlatform.instagram} Instagram`);
+      if (d.byPlatform.facebook) parts.push(`${d.byPlatform.facebook} Facebook`);
+      let msg = parts.length
+        ? `Added thumbnails: ${parts.join(', ')}.`
+        : 'No new thumbnails found in this batch.';
+      if (d.failed) msg += `\n\n${d.failed} rows had no thumbnail available (usually login-walled Facebook posts or expired Instagram links) — they'll stay as placeholders.`;
+      if (d.remaining > 0) msg += `\n\n${d.remaining} rows still to check — click the button again to continue.`;
+      else if (d.updated > 0) msg += '\n\nAll done!';
+      alert(msg);
+      loadSheetResults(); // reload grid so new thumbs appear immediately
+    } else {
+      alert('Backfill failed: ' + (d.error || 'unknown error'));
+    }
+  } catch (e) {
+    alert('Backfill failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.innerHTML = orig;
+  }
+}
+
 async function loadSheetResults(){
   try{
     const r = await fetch('/api/sheet-data?t=' + Date.now());

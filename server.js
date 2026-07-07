@@ -628,6 +628,140 @@ app.get('/api/tiktok-embed', async (req, res) => {
   }
 });
 
+// One-time backfill for rows that were harvested BEFORE the thumbnail column existed.
+// Handles all three platforms:
+//   - TikTok:    hits TikTok's public oEmbed endpoint (free, reliable)
+//   - Instagram: fetches the post URL with a Facebook-crawler User-Agent and extracts
+//                the og:image meta tag (free, works because IG serves OpenGraph preview
+//                images to link-preview bots for Slack/Twitter/etc)
+//   - Facebook:  same og:image approach as Instagram; occasionally hits a login wall and
+//                returns nothing for that URL, in which case that row stays as placeholder
+// Best-effort throughout — a URL that doesn't return anything just gets skipped, no crash.
+// Processed in batches of BATCH_CAP so the HTTP request completes within Render's ~100s
+// platform timeout — if more rows remain, the user clicks the button again to continue.
+app.post('/api/backfill-thumbs', async (req, res) => {
+  try {
+    const auth = getGoogleAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+    await ensureHeaders(sheets); // make sure column I header exists before writing to it
+
+    const r = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: SHEET_RANGE });
+    const rows = r.data.values || [];
+
+    // Find rows across all three platforms with a URL but empty thumbnail cell.
+    // Row 1 is the header, so real data starts at index 1 → sheet row 2.
+    const targets = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const platform = row[0];
+      const url = row[3];
+      const existingThumb = row[8];
+      if (url && !existingThumb && (platform === 'TikTok' || platform === 'Instagram' || platform === 'Facebook')) {
+        targets.push({ sheetRow: i + 1, url, platform });
+      }
+    }
+
+    // Lower cap than TikTok-only since IG/FB HTML fetches are slower than a JSON oEmbed call.
+    // 100 rows at ~500ms average ≈ 50s worst case, comfortably under Render's ~100s ceiling.
+    const BATCH_CAP = 100;
+    const batch = targets.slice(0, BATCH_CAP);
+
+    const updates = []; // Google Sheets batchUpdate payload — one entry per cell we're writing
+    const stats = { tiktok: 0, instagram: 0, facebook: 0, failed: 0 };
+
+    for (const t of batch) {
+      try {
+        let thumb = null;
+        if (t.platform === 'TikTok') {
+          thumb = await fetchTikTokOembedThumb(t.url);
+          if (thumb) stats.tiktok++;
+        } else {
+          // Instagram & Facebook both go through og:image extraction
+          thumb = await fetchOgImage(t.url);
+          if (thumb) {
+            if (t.platform === 'Instagram') stats.instagram++;
+            else stats.facebook++;
+          }
+        }
+        if (thumb) {
+          updates.push({
+            range: `'${SHEET_NAME}'!I${t.sheetRow}`,
+            values: [[thumb]],
+          });
+        } else {
+          stats.failed++;
+        }
+      } catch (e) {
+        stats.failed++;
+      }
+      // Small politeness delay so we don't hammer any single origin mid-batch
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    // Single batch write is much faster than one-cell-per-request
+    if (updates.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: SHEET_ID,
+        requestBody: { valueInputOption: 'RAW', data: updates },
+      });
+    }
+
+    console.log(`[Backfill] tt=${stats.tiktok} ig=${stats.instagram} fb=${stats.facebook} failed=${stats.failed} remaining=${Math.max(0, targets.length - batch.length)}`);
+
+    res.json({
+      ok: true,
+      checked: batch.length,
+      updated: stats.tiktok + stats.instagram + stats.facebook,
+      byPlatform: { tiktok: stats.tiktok, instagram: stats.instagram, facebook: stats.facebook },
+      failed: stats.failed,
+      totalTargets: targets.length,
+      remaining: Math.max(0, targets.length - batch.length),
+    });
+  } catch (err) {
+    console.error('Backfill error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Helper: fetch a TikTok video URL's cover image via TikTok's public oEmbed endpoint.
+// Free, no auth. Returns the thumbnail URL string, or null on any failure.
+async function fetchTikTokOembedThumb(url) {
+  try {
+    const oembedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`;
+    const r = await fetch(oembedUrl, { timeout: 8000 });
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data.thumbnail_url || null;
+  } catch {
+    return null;
+  }
+}
+
+// Helper: fetch any URL's OpenGraph preview image by extracting the og:image meta tag
+// from the HTML head. Instagram and Facebook both serve full OpenGraph metadata to
+// crawler-identified User-Agents (they use this for link previews on other platforms),
+// so pretending to be Facebook's own link-preview bot is more reliable than pretending
+// to be a browser (which would get an SPA shell without meta tags populated server-side).
+async function fetchOgImage(url) {
+  try {
+    const r = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; facebookexternalhit/1.1; +http://www.facebook.com/externalhit_uatext.php)',
+      },
+      timeout: 8000,
+      redirect: 'follow',
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    // Try both attribute orders — the property and content attrs can appear either way round
+    const m = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i)
+      || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 // Image proxy — strips the browser's Referer header when fetching a thumbnail so that
 // Instagram (and occasionally TikTok) CDN URLs don't 403 the request. The frontend
 // routes all sheet-backed thumbnail URLs through this endpoint. Whitelisted to the
