@@ -412,16 +412,17 @@ async function runFullHarvest(sheets) {
     }, 'TikTok'),
 
     runApifyActor('apify~instagram-scraper', {
-      // searchType only supports Hashtag/Profile/Place (confirmed directly on Apify's
-      // input form) — no general/broad search exists for this Actor. Given that real
-      // constraint, the best lever we have is searching multiple relevant hashtags
-      // rather than just one, similar to the TikTok approach.
+      // Explicitly clearing directUrls to prevent Apify from merging our input
+      // with the saved form defaults (which had humansofny example URL still in it).
+      // Without this, Apify was ignoring our search field entirely and using the
+      // saved form state, causing the near-zero results we saw in real runs.
+      directUrls: [],
       search: 'farmersdefense',
       searchType: 'hashtag',
       searchLimit: 100,
-      resultsType: 'reels', // confirmed value from your saved config — kept as is
+      resultsType: 'posts', // broader than reels-only, catches more content types
       resultsLimit: 100,
-      // directUrls intentionally omitted — search-based input only
+      addParentData: false,
     }, 'Instagram'),
 
     runApifyActor('apify~google-search-scraper', {
