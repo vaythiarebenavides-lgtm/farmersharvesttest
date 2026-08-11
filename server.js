@@ -154,19 +154,32 @@ app.post('/api/sheet-add', async (req, res) => {
     const existing = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `'${SHEET_NAME}'!D:D` });
     const existingLinks = new Set((existing.data.values || []).map(r => r[0]));
 
-    const rowsToAdd = newItems
-      .filter(item => item.url && !existingLinks.has(item.url))
-      .map(item => [
-        item.platform || '',
-        item.creator || '',
-        item.title || '',
-        item.url || '',
-        item.views || '',
-        item.date || '',
-        new Date().toISOString().split('T')[0],
-        'FALSE',
-        item.thumb || '', // Column I — thumbnail URL when the scraper captured one
-      ]);
+    const toAdd = newItems.filter(item => item.url && !existingLinks.has(item.url));
+
+    // Encode thumbnails to base64 before writing — see the detailed comment on
+    // the same logic in /api/harvest-all. Short version: scraper-supplied CDN
+    // URLs expire within days, so we bake the image into the sheet instead.
+    const CONCURRENCY = 5;
+    for (let i = 0; i < toAdd.length; i += CONCURRENCY) {
+      const slice = toAdd.slice(i, i + CONCURRENCY);
+      await Promise.all(slice.map(async (item) => {
+        if (!item.thumb || item.thumb.startsWith('data:image/')) return;
+        const dataUrl = await fetchAndEncodeThumb(item.thumb);
+        item.thumb = dataUrl || '';
+      }));
+    }
+
+    const rowsToAdd = toAdd.map(item => [
+      item.platform || '',
+      item.creator || '',
+      item.title || '',
+      item.url || '',
+      item.views || '',
+      item.date || '',
+      new Date().toISOString().split('T')[0],
+      'FALSE',
+      item.thumb || '', // Column I — base64 data URL, permanent, set above
+    ]);
 
     if (rowsToAdd.length === 0) {
       return res.json({ ok: true, added: 0, message: 'No new items — all already in sheet' });
@@ -767,19 +780,59 @@ async function runFullHarvest(sheets) {
       console.error('[Sheet] Could not read blocklist (non-fatal):', blockErr.message);
     }
 
-    const rowsToAdd = allRows
-      .filter(item => item.url && !existingLinks.has(item.url))
-      .map(item => [
-        item.platform || '',
-        item.creator || '',
-        item.title || '',
-        item.url || '',
-        item.views || '',
-        item.date || '',
-        new Date().toISOString().split('T')[0],
-        'FALSE',
-        item.thumb || '', // Column I — thumbnail URL when the scraper captured one
-      ]);
+    const newItems = allRows.filter(item => item.url && !existingLinks.has(item.url));
+
+    // Encode thumbnails to base64 at harvest time. The Apify scrapers already
+    // hand us a working CDN image URL for most Instagram/Facebook/TikTok posts
+    // (displayUrl / thumbnailUrl / images[0] / coverUrl), but those URLs are
+    // signed and expire within a couple of days. Encoding them right now — while
+    // the URL is still fresh and we're already doing network work — means the
+    // thumbnail is permanent from the moment the row lands in the sheet, and
+    // nobody ever has to run the backfill for newly harvested content.
+    //
+    // This is the fix for the "Instagram and Facebook thumbnails never fill in"
+    // problem: the backfill can't get them because scraping IG/FB HTML server-side
+    // hits a login wall, but Apify (running a real browser) already got past that
+    // during the harvest. We just have to not throw the URL away.
+    //
+    // Runs with limited concurrency so a large harvest doesn't stall on serial
+    // image downloads or hammer the CDNs. Failures degrade gracefully — the row
+    // still gets written, just with an empty thumbnail cell that a later backfill
+    // run can retry.
+    const CONCURRENCY = 5;
+    let encodedCount = 0;
+    let encodeFailCount = 0;
+    for (let i = 0; i < newItems.length; i += CONCURRENCY) {
+      const slice = newItems.slice(i, i + CONCURRENCY);
+      await Promise.all(slice.map(async (item) => {
+        if (!item.thumb) return; // scraper gave us nothing to work with
+        // Already a data URL (shouldn't happen from a scraper, but be safe)
+        if (item.thumb.startsWith('data:image/')) return;
+        const dataUrl = await fetchAndEncodeThumb(item.thumb);
+        if (dataUrl) {
+          item.thumb = dataUrl;
+          encodedCount++;
+        } else {
+          // Encoding failed — drop the ephemeral CDN URL rather than storing a
+          // link that's going to 404 in 48 hours and look broken in the grid.
+          item.thumb = '';
+          encodeFailCount++;
+        }
+      }));
+    }
+    console.log(`[Thumbs] Encoded ${encodedCount} thumbnails at harvest time, ${encodeFailCount} failed`);
+
+    const rowsToAdd = newItems.map(item => [
+      item.platform || '',
+      item.creator || '',
+      item.title || '',
+      item.url || '',
+      item.views || '',
+      item.date || '',
+      new Date().toISOString().split('T')[0],
+      'FALSE',
+      item.thumb || '', // Column I — base64 data URL, permanent, set above
+    ]);
 
     const skipped = allRows.length - rowsToAdd.length;
     console.log(`[Sheet] After dedup: ${rowsToAdd.length} new rows to add, ${skipped} skipped as duplicates (of ${allRows.length} filtered rows total)`);
