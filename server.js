@@ -391,6 +391,8 @@ function parseTikTokItems(items) {
         views: formatViews(views),
         date,
         thumb,
+        // Diagnostic only — see note in parseInstagramItems. Not written to the sheet.
+        _raw: item,
       };
     });
 }
@@ -431,11 +433,73 @@ function parseInstagramItems(items) {
         views: formatViews(views),
         date,
         thumb,
+        // Kept only for the harvest-time thumbnail diagnostic; never written to
+        // the sheet. Lets us log the real Apify field names when thumb comes back
+        // empty, instead of guessing which key holds the image.
+        _raw: item,
       };
     });
 }
 
-// Google Search results are generic SERP data (title, url, snippet) — we filter to
+// Parser for scrapeforge~facebook-search-posts. This Actor does real keyword search
+// against Facebook (unlike the Google Search workaround, which only finds links via
+// SERP data and gets no images, dates, or engagement numbers).
+//
+// IMPORTANT: this Actor returns FLATTENED keys with literal dots in the property
+// names — `item["image.uri"]`, `item["author.name"]`, `item["author.url"]`. They are
+// NOT nested objects, so `item.image.uri` would throw / return undefined. Verified
+// against a real sample run before writing this; do not "simplify" to dot access.
+//
+// Not every post comes back with an image — in sampling, roughly one in five had
+// `image.uri` populated. Posts without one still get written (the caption, date, and
+// engagement data are all valuable); they just show a placeholder in the grid.
+function parseFacebookSearchItems(items) {
+  if (!Array.isArray(items)) {
+    console.error('[Facebook] Expected an array of items but got:', typeof items);
+    return [];
+  }
+  return items
+    .filter(item => item && item.url)
+    .map(item => {
+      // Prefer the real author name the Actor gives us over guessing a handle from
+      // the URL. Fall back to URL-derived extraction only if the field is missing.
+      const authorName = item['author.name'] || '';
+      const authorUrl = item['author.url'] || '';
+      const creator = authorName
+        || extractCreator(authorUrl || item.url, item.message)
+        || 'Unknown';
+
+      // Facebook has no view count. reactions_count is the closest analogue to
+      // likes/views on the other platforms, so the "Most popular" sort stays
+      // meaningful when mixing platforms in one grid.
+      const views = item.reactions_count ?? 0;
+
+      // timestamp is Unix seconds. Guard against it arriving as a string or as
+      // already-formatted ISO from a future Actor version.
+      let date = '';
+      if (typeof item.timestamp === 'number' && item.timestamp > 0) {
+        date = new Date(item.timestamp * 1000).toISOString().split('T')[0];
+      } else if (typeof item.timestamp === 'string' && item.timestamp.includes('T')) {
+        date = item.timestamp.split('T')[0];
+      }
+
+      return {
+        platform: 'Facebook',
+        creator,
+        title: (item.message || '').slice(0, 300),
+        url: item.url,
+        views: formatViews(views),
+        date,
+        // Flattened key — see note above. Checked in fallback order in case the
+        // Actor adds nested or alternate shapes later.
+        thumb: item['image.uri'] || item.image?.uri || item.imageUrl || '',
+        // Diagnostic only — see note in parseInstagramItems. Not written to the sheet.
+        _raw: item,
+      };
+    });
+}
+
+
 // only keep results actually pointing at facebook.com or instagram.com domains,
 // since the search query itself can sometimes return unrelated indexed pages too.
 // Defensive against multiple possible response shapes since we haven't seen a real sample yet.
@@ -469,6 +533,8 @@ function parseGoogleSearchItems(items) {
         // field names show up depending on the result type. If none are present the
         // sheet cell stays empty and the UI shows a placeholder — acceptable fallback.
         thumb: result.thumbnailImageUrl || result.image || result.imageUrl || '',
+        // Diagnostic only — see note in parseInstagramItems. Not written to the sheet.
+        _raw: result,
       });
     }
   }
@@ -651,7 +717,17 @@ async function runFullHarvest(sheets) {
   const allRows = [];
 
   // Run all three platforms. Each is wrapped so a failure in one doesn't stop the others.
-  const [tiktokRun, instagramRun, googleRun] = await Promise.all([
+  // Query terms for the Facebook search Actor. Each one costs a separate Actor run,
+  // so keep the list tight. All results still pass through filterRelevant afterwards,
+  // which requires the brand name (or "defense" + a product word) in the caption or
+  // author name — so a broad query like "farmers defense" can't drag in rubbish.
+  const FACEBOOK_SEARCH_QUERIES = [
+    'farmers defense',
+    'farmers defense sleeves',
+    'farmersdefense',
+  ];
+
+  const [tiktokRun, instagramRun, googleRun, ...facebookRuns] = await Promise.all([
     runApifyActor('clockworks~tiktok-scraper', {
       // Only using verified brand-specific and product-specific hashtags. Generic ones
       // like #sleeves, #farmer, #uvprotection, #sunprotection, #testimonial, #gardeninggear
@@ -729,6 +805,24 @@ async function runFullHarvest(sheets) {
       saveHtml: false,
       saveHtmlToKeyValueStore: false,
     }, 'GoogleSearch(Facebook)'),
+
+    // Real Facebook keyword search via scrapeforge~facebook-search-posts.
+    // This Actor takes ONE query per run, so we fire three in parallel to cover the
+    // main brand-name variations. At $2.59/1000 results and 30 results each, the
+    // whole set costs roughly $0.23 per harvest — negligible next to the ~$1 the
+    // TikTok and Instagram scrapers already cost.
+    //
+    // This runs ALONGSIDE the Google Search actor rather than replacing it: Google
+    // still contributes bonus Instagram coverage plus occasional Facebook links this
+    // Actor misses. Overlap is harmless — dedup by URL happens before the sheet write.
+    ...FACEBOOK_SEARCH_QUERIES.map(q =>
+      runApifyActor('scrapeforge~facebook-search-posts', {
+        searchQuery: q,
+        searchType: 'posts',
+        maxResults: 30,
+        recentPostsFirst: true,
+      }, `Facebook(${q})`)
+    ),
   ]);
 
   // TikTok
@@ -758,6 +852,24 @@ async function runFullHarvest(sheets) {
     allRows.push(...rows);
     platformResults.googleSearch.count = rows.length;
   }
+
+  // Facebook keyword search — one Actor run per query, results merged. Unlike the
+  // Google Search path these rows carry real dates, engagement counts, author names,
+  // and (for a subset of posts) an image URL that gets base64-encoded downstream.
+  // Every row still goes through filterRelevant so unrelated posts that merely match
+  // the search string get dropped before they reach the sheet.
+  const facebookOk = facebookRuns.some(r => r.ok);
+  const facebookError = facebookRuns.find(r => !r.ok)?.error || null;
+  platformResults.facebook = { ok: facebookOk, error: facebookError, count: 0 };
+  let facebookTotal = 0;
+  for (const run of facebookRuns) {
+    if (!run.ok) continue;
+    const rawRows = parseFacebookSearchItems(run.items);
+    const rows = filterRelevant(rawRows, 'Facebook');
+    allRows.push(...rows);
+    facebookTotal += rows.length;
+  }
+  platformResults.facebook.count = facebookTotal;
 
   // Write everything to the sheet with deduplication by link, same logic as sheet-add
   let added = 0;
@@ -802,10 +914,36 @@ async function runFullHarvest(sheets) {
     const CONCURRENCY = 5;
     let encodedCount = 0;
     let encodeFailCount = 0;
+    let noUrlCount = 0;
+
+    // Diagnostic: for each platform, if any item arrived without a thumbnail URL,
+    // log the actual field names Apify gave us on the first such item. Guessing at
+    // scraper field names from memory has burned us before — this makes the real
+    // response shape visible in the logs so a missing field can be fixed with
+    // certainty instead of trial and error. Only logs one sample per platform per
+    // run so it doesn't flood the log on a large harvest.
+    const diagnosedPlatforms = new Set();
+    for (const item of newItems) {
+      if (item.thumb) continue;
+      const platform = item.platform || 'Unknown';
+      if (diagnosedPlatforms.has(platform)) continue;
+      diagnosedPlatforms.add(platform);
+      const raw = item._raw || null;
+      if (raw && typeof raw === 'object') {
+        // Surface any key whose name hints at an image so we can spot the right
+        // field immediately, plus the full key list as a fallback.
+        const imageish = Object.keys(raw).filter(k => /image|thumb|display|cover|photo|media|pic|preview/i.test(k));
+        console.log(`[Thumbs][diag] ${platform}: no thumb. image-like keys = ${JSON.stringify(imageish)}`);
+        console.log(`[Thumbs][diag] ${platform}: all keys = ${JSON.stringify(Object.keys(raw))}`);
+      } else {
+        console.log(`[Thumbs][diag] ${platform}: no thumb and no raw item captured for inspection`);
+      }
+    }
+
     for (let i = 0; i < newItems.length; i += CONCURRENCY) {
       const slice = newItems.slice(i, i + CONCURRENCY);
       await Promise.all(slice.map(async (item) => {
-        if (!item.thumb) return; // scraper gave us nothing to work with
+        if (!item.thumb) { noUrlCount++; return; } // scraper gave us nothing to work with
         // Already a data URL (shouldn't happen from a scraper, but be safe)
         if (item.thumb.startsWith('data:image/')) return;
         const dataUrl = await fetchAndEncodeThumb(item.thumb);
@@ -820,7 +958,7 @@ async function runFullHarvest(sheets) {
         }
       }));
     }
-    console.log(`[Thumbs] Encoded ${encodedCount} thumbnails at harvest time, ${encodeFailCount} failed`);
+    console.log(`[Thumbs] Encoded ${encodedCount}, encode-failed ${encodeFailCount}, no-url-from-scraper ${noUrlCount} (of ${newItems.length} new rows)`);
 
     const rowsToAdd = newItems.map(item => [
       item.platform || '',
