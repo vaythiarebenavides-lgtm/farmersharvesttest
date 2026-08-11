@@ -445,14 +445,15 @@ function parseInstagramItems(items) {
 // against Facebook (unlike the Google Search workaround, which only finds links via
 // SERP data and gets no images, dates, or engagement numbers).
 //
-// IMPORTANT: this Actor returns FLATTENED keys with literal dots in the property
-// names — `item["image.uri"]`, `item["author.name"]`, `item["author.url"]`. They are
-// NOT nested objects, so `item.image.uri` would throw / return undefined. Verified
-// against a real sample run before writing this; do not "simplify" to dot access.
+// IMPORTANT: this Actor returns items in TWO DIFFERENT SHAPES, confirmed from real
+// runs. Some items arrive flattened, with literal dots in the property names —
+// `item["image.uri"]`, `item["author.name"]`. Others arrive with proper nested
+// objects — `item.image.uri`, `item.author.name`. Reading only one shape silently
+// misses roughly half the images, so every field below checks both.
 //
-// Not every post comes back with an image — in sampling, roughly one in five had
-// `image.uri` populated. Posts without one still get written (the caption, date, and
-// engagement data are all valuable); they just show a placeholder in the grid.
+// Image can also live under `video_thumbnail` (video posts) or `album_preview`
+// (multi-photo posts), neither of which appeared in the first sample. Checking all
+// four sources materially improves the hit rate over `image` alone.
 function parseFacebookSearchItems(items) {
   if (!Array.isArray(items)) {
     console.error('[Facebook] Expected an array of items but got:', typeof items);
@@ -461,18 +462,23 @@ function parseFacebookSearchItems(items) {
   return items
     .filter(item => item && item.url)
     .map(item => {
-      // Prefer the real author name the Actor gives us over guessing a handle from
-      // the URL. Fall back to URL-derived extraction only if the field is missing.
-      const authorName = item['author.name'] || '';
-      const authorUrl = item['author.url'] || '';
+      // Author: flattened key first, then nested object, then the `authors` array
+      // some items carry instead, then finally fall back to deriving from the URL.
+      const authorName =
+        item['author.name'] ||
+        item.author?.name ||
+        (Array.isArray(item.authors) && item.authors[0]?.name) ||
+        '';
+      const authorUrl = item['author.url'] || item.author?.url || '';
       const creator = authorName
         || extractCreator(authorUrl || item.url, item.message)
         || 'Unknown';
 
-      // Facebook has no view count. reactions_count is the closest analogue to
-      // likes/views on the other platforms, so the "Most popular" sort stays
-      // meaningful when mixing platforms in one grid.
-      const views = item.reactions_count ?? 0;
+      // Facebook has no plain "view count" for image posts, but video posts do expose
+      // video_view_count. Prefer that when present since it's directly comparable to
+      // TikTok/Instagram view numbers; otherwise fall back to reactions, which is the
+      // closest analogue to likes. Keeps the "Most popular" sort meaningful.
+      const views = item.video_view_count ?? item.reactions_count ?? 0;
 
       // timestamp is Unix seconds. Guard against it arriving as a string or as
       // already-formatted ISO from a future Actor version.
@@ -483,6 +489,20 @@ function parseFacebookSearchItems(items) {
         date = item.timestamp.split('T')[0];
       }
 
+      // Image, in priority order across both item shapes and all known carriers.
+      // album_preview may be an array of image objects or a single object depending
+      // on the post, so it's unwrapped defensively rather than assumed.
+      const albumPreview = Array.isArray(item.album_preview) ? item.album_preview[0] : item.album_preview;
+      const thumb =
+        item['image.uri'] ||                    // flattened single image
+        item.image?.uri ||                      // nested single image
+        (typeof item.image === 'string' ? item.image : '') ||
+        item.video_thumbnail?.uri ||            // video post cover, nested
+        (typeof item.video_thumbnail === 'string' ? item.video_thumbnail : '') ||
+        albumPreview?.uri ||                    // multi-photo post, first image
+        (typeof albumPreview === 'string' ? albumPreview : '') ||
+        '';
+
       return {
         platform: 'Facebook',
         creator,
@@ -490,9 +510,7 @@ function parseFacebookSearchItems(items) {
         url: item.url,
         views: formatViews(views),
         date,
-        // Flattened key — see note above. Checked in fallback order in case the
-        // Actor adds nested or alternate shapes later.
-        thumb: item['image.uri'] || item.image?.uri || item.imageUrl || '',
+        thumb,
         // Diagnostic only — see note in parseInstagramItems. Not written to the sheet.
         _raw: item,
       };
@@ -918,6 +936,11 @@ async function runFullHarvest(sheets) {
     let encodedCount = 0;
     let encodeFailCount = 0;
     let noUrlCount = 0;
+    // Tally missing-image rows per platform. Without this the aggregate count is
+    // ambiguous — a high number could mean the Facebook parser is missing a field,
+    // or simply that Google Search rows (which never carry images) dominate the
+    // batch. The breakdown distinguishes a fixable bug from a known limitation.
+    const noUrlByPlatform = {};
 
     // Diagnostic: for each platform, if any item arrived without a thumbnail URL,
     // log the actual field names Apify gave us on the first such item. Guessing at
@@ -946,7 +969,12 @@ async function runFullHarvest(sheets) {
     for (let i = 0; i < newItems.length; i += CONCURRENCY) {
       const slice = newItems.slice(i, i + CONCURRENCY);
       await Promise.all(slice.map(async (item) => {
-        if (!item.thumb) { noUrlCount++; return; } // scraper gave us nothing to work with
+        if (!item.thumb) {
+          noUrlCount++;
+          const p = item.platform || 'Unknown';
+          noUrlByPlatform[p] = (noUrlByPlatform[p] || 0) + 1;
+          return; // scraper gave us nothing to work with
+        }
         // Already a data URL (shouldn't happen from a scraper, but be safe)
         if (item.thumb.startsWith('data:image/')) return;
         const dataUrl = await fetchAndEncodeThumb(item.thumb);
@@ -962,6 +990,9 @@ async function runFullHarvest(sheets) {
       }));
     }
     console.log(`[Thumbs] Encoded ${encodedCount}, encode-failed ${encodeFailCount}, no-url-from-scraper ${noUrlCount} (of ${newItems.length} new rows)`);
+    if (noUrlCount > 0) {
+      console.log(`[Thumbs] Missing images by platform: ${JSON.stringify(noUrlByPlatform)}`);
+    }
 
     const rowsToAdd = newItems.map(item => [
       item.platform || '',
