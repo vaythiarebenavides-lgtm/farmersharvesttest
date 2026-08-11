@@ -54,49 +54,27 @@ async function ensureHeaders(sheets) {
 // x-expires querystring that ages out ~2 days after fetch. This means every
 // stored thumbnail eventually 404s and the grid goes blank.
 //
-// The fix: download the image bytes once and re-upload them to our own Drive
-// folder as PUBLIC files. Drive URLs are permanent — the file ID never changes,
-// and the lh3.googleusercontent.com CDN serves the same bytes forever.
+// The fix: download the image bytes once and re-upload them to a Drive folder
+// as PUBLIC files. Drive URLs are permanent — the file ID never changes, and
+// the lh3.googleusercontent.com CDN serves the same bytes forever.
 //
-// The Drive folder lives INSIDE THE SERVICE ACCOUNT's own Drive (not the
-// user's), which we can't browse in the normal Drive UI. That's an acceptable
-// tradeoff — the user never needs to see these files directly, they only need
-// them to render in the grid. We cache the folder ID in memory so we don't
-// look it up on every call. On cold start, the first backfill run recreates
-// the cache with one extra API call.
+// The folder must be created by a real Google user (not the service account,
+// which has zero storage quota of its own) and shared with the service account
+// as Editor. Its ID is passed in via env var so we don't hardcode it. If the
+// env var is missing we skip rehosting entirely and fall back to writing the
+// raw CDN URL, which at least works for a day before expiring.
 
-const THUMB_FOLDER_NAME = 'FarmersHarvest Thumbnails';
-let cachedThumbFolderId = null;
-
-// Look up (or create) the thumbnail folder in the service account's Drive.
-// Cached after first success so we're not hitting Drive on every rehost call.
-async function getOrCreateThumbFolder(drive) {
-  if (cachedThumbFolderId) return cachedThumbFolderId;
-  // Search for an existing folder with our expected name. Filter to folder MIME
-  // type and non-trashed so we don't get confused by user-shared folders that
-  // happen to share the name.
-  const q = `name = '${THUMB_FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-  const found = await drive.files.list({ q, fields: 'files(id, name)', pageSize: 1 });
-  if (found.data.files && found.data.files.length > 0) {
-    cachedThumbFolderId = found.data.files[0].id;
-    return cachedThumbFolderId;
-  }
-  // No folder exists yet — create it. Service accounts can freely create
-  // folders in their own root; the resulting folder isn't visible in any
-  // user's Drive UI but is fully addressable via API and public file URLs.
-  const created = await drive.files.create({
-    requestBody: { name: THUMB_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' },
-    fields: 'id',
-  });
-  cachedThumbFolderId = created.data.id;
-  return cachedThumbFolderId;
-}
+const THUMB_FOLDER_ID = process.env.HARVEST_THUMBS_FOLDER_ID;
 
 // Rehost an external image URL to Drive and return a permanent public URL.
 // Returns null on failure so callers can fall back to leaving the cell blank
 // rather than writing a broken URL. Handles the three-step dance: download
 // bytes, upload to Drive, make public, then hand back the CDN URL.
 async function rehostToDrive(drive, imageUrl, filenameHint) {
+  if (!THUMB_FOLDER_ID) {
+    console.error('rehostToDrive: HARVEST_THUMBS_FOLDER_ID env var not set — cannot rehost');
+    return null;
+  }
   try {
     // Some IG/FB URLs 403 without a real-browser UA. Use one that matches
     // what our other fetches use so we don't get blocked differently here.
@@ -114,7 +92,6 @@ async function rehostToDrive(drive, imageUrl, filenameHint) {
     // to jpeg (all three platforms serve jpeg thumbnails).
     const mimeType = imgRes.headers.get('content-type')?.split(';')[0] || 'image/jpeg';
     const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
-    const folderId = await getOrCreateThumbFolder(drive);
     // Node streams need a Readable, not a raw Buffer, for the googleapis upload path.
     const { Readable } = require('stream');
     const stream = Readable.from(buffer);
@@ -122,10 +99,14 @@ async function rehostToDrive(drive, imageUrl, filenameHint) {
     // recognizable name helps if we ever poke around via API for debugging.
     const safeHint = (filenameHint || 'thumb').replace(/[^a-zA-Z0-9-_]/g, '_').slice(0, 60);
     const filename = `${safeHint}_${Date.now()}.${ext}`;
+    // supportsAllDrives:true lets us upload into a folder shared TO the service
+    // account by a real user (which is our case here — the folder lives in the
+    // user's My Drive and was shared with the service account as Editor).
     const uploaded = await drive.files.create({
-      requestBody: { name: filename, parents: [folderId] },
+      requestBody: { name: filename, parents: [THUMB_FOLDER_ID] },
       media: { mimeType, body: stream },
       fields: 'id',
+      supportsAllDrives: true,
     });
     const fileId = uploaded.data.id;
     // Make the file public-read so lh3.googleusercontent.com will serve it
@@ -133,6 +114,7 @@ async function rehostToDrive(drive, imageUrl, filenameHint) {
     await drive.permissions.create({
       fileId,
       requestBody: { role: 'reader', type: 'anyone' },
+      supportsAllDrives: true,
     });
     // lh3 is Google's image CDN — it serves the same bytes forever, sized on
     // demand via URL params, and doesn't require any auth. Way better for
