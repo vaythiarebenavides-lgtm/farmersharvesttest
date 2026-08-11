@@ -14,7 +14,13 @@ function getGoogleAuth() {
   const creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
   return new google.auth.GoogleAuth({
     credentials: creds,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    // Added drive scope so we can create the auto-managed thumbnail folder and
+    // upload rehosted thumbnails. Without this scope, thumbnail rehost fails
+    // silently and we fall back to short-lived CDN URLs (which expire).
+    scopes: [
+      'https://www.googleapis.com/auth/spreadsheets',
+      'https://www.googleapis.com/auth/drive',
+    ],
   });
 }
 
@@ -42,7 +48,103 @@ async function ensureHeaders(sheets) {
   }
 }
 
-// ── GET ALL ROWS ──
+// ── DRIVE THUMBNAIL REHOST ─────────────────────────────────────────────────
+// The problem: Instagram/Facebook/TikTok CDN URLs are signed to expire within
+// hours-to-days. Even TikTok oEmbed URLs (which we used to trust) have an
+// x-expires querystring that ages out ~2 days after fetch. This means every
+// stored thumbnail eventually 404s and the grid goes blank.
+//
+// The fix: download the image bytes once and re-upload them to our own Drive
+// folder as PUBLIC files. Drive URLs are permanent — the file ID never changes,
+// and the lh3.googleusercontent.com CDN serves the same bytes forever.
+//
+// The Drive folder lives INSIDE THE SERVICE ACCOUNT's own Drive (not the
+// user's), which we can't browse in the normal Drive UI. That's an acceptable
+// tradeoff — the user never needs to see these files directly, they only need
+// them to render in the grid. We cache the folder ID in memory so we don't
+// look it up on every call. On cold start, the first backfill run recreates
+// the cache with one extra API call.
+
+const THUMB_FOLDER_NAME = 'FarmersHarvest Thumbnails';
+let cachedThumbFolderId = null;
+
+// Look up (or create) the thumbnail folder in the service account's Drive.
+// Cached after first success so we're not hitting Drive on every rehost call.
+async function getOrCreateThumbFolder(drive) {
+  if (cachedThumbFolderId) return cachedThumbFolderId;
+  // Search for an existing folder with our expected name. Filter to folder MIME
+  // type and non-trashed so we don't get confused by user-shared folders that
+  // happen to share the name.
+  const q = `name = '${THUMB_FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  const found = await drive.files.list({ q, fields: 'files(id, name)', pageSize: 1 });
+  if (found.data.files && found.data.files.length > 0) {
+    cachedThumbFolderId = found.data.files[0].id;
+    return cachedThumbFolderId;
+  }
+  // No folder exists yet — create it. Service accounts can freely create
+  // folders in their own root; the resulting folder isn't visible in any
+  // user's Drive UI but is fully addressable via API and public file URLs.
+  const created = await drive.files.create({
+    requestBody: { name: THUMB_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' },
+    fields: 'id',
+  });
+  cachedThumbFolderId = created.data.id;
+  return cachedThumbFolderId;
+}
+
+// Rehost an external image URL to Drive and return a permanent public URL.
+// Returns null on failure so callers can fall back to leaving the cell blank
+// rather than writing a broken URL. Handles the three-step dance: download
+// bytes, upload to Drive, make public, then hand back the CDN URL.
+async function rehostToDrive(drive, imageUrl, filenameHint) {
+  try {
+    // Some IG/FB URLs 403 without a real-browser UA. Use one that matches
+    // what our other fetches use so we don't get blocked differently here.
+    const imgRes = await fetch(imageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+        'Accept': 'image/webp,image/*,*/*;q=0.8',
+      },
+    });
+    if (!imgRes.ok) return null;
+    // Grab the bytes as a buffer we can stream into Drive.
+    const buffer = Buffer.from(await imgRes.arrayBuffer());
+    if (buffer.length === 0) return null;
+    // Preserve the source mime type if the CDN gave us one, otherwise default
+    // to jpeg (all three platforms serve jpeg thumbnails).
+    const mimeType = imgRes.headers.get('content-type')?.split(';')[0] || 'image/jpeg';
+    const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
+    const folderId = await getOrCreateThumbFolder(drive);
+    // Node streams need a Readable, not a raw Buffer, for the googleapis upload path.
+    const { Readable } = require('stream');
+    const stream = Readable.from(buffer);
+    // Filename doesn't matter functionally — Drive keys files by ID — but a
+    // recognizable name helps if we ever poke around via API for debugging.
+    const safeHint = (filenameHint || 'thumb').replace(/[^a-zA-Z0-9-_]/g, '_').slice(0, 60);
+    const filename = `${safeHint}_${Date.now()}.${ext}`;
+    const uploaded = await drive.files.create({
+      requestBody: { name: filename, parents: [folderId] },
+      media: { mimeType, body: stream },
+      fields: 'id',
+    });
+    const fileId = uploaded.data.id;
+    // Make the file public-read so lh3.googleusercontent.com will serve it
+    // to anyone. Without this the image URL 403s for logged-out users.
+    await drive.permissions.create({
+      fileId,
+      requestBody: { role: 'reader', type: 'anyone' },
+    });
+    // lh3 is Google's image CDN — it serves the same bytes forever, sized on
+    // demand via URL params, and doesn't require any auth. Way better for
+    // <img src> than the drive.google.com/uc URL which redirects and can
+    // sometimes hit rate limits.
+    return `https://lh3.googleusercontent.com/d/${fileId}`;
+  } catch (e) {
+    console.error('rehostToDrive failed:', e.message);
+    return null;
+  }
+}
+
 app.get('/api/sheet-data', async (req, res) => {
   try {
     const auth = getGoogleAuth();
@@ -801,7 +903,14 @@ app.post('/api/backfill-thumbs', async (req, res) => {
   try {
     const auth = getGoogleAuth();
     const sheets = google.sheets({ version: 'v4', auth });
+    const drive = google.drive({ version: 'v3', auth });
     await ensureHeaders(sheets); // make sure column I header exists before writing to it
+
+    // ?force=true → refresh every row's thumbnail, including ones that already
+    // have a URL. Needed because IG/FB/TikTok CDN URLs saved before the Drive
+    // rehost went live are all expiring. Default false so normal daily runs
+    // stay fast and only backfill genuinely-missing rows.
+    const force = req.query.force === 'true' || req.body?.force === true;
 
     const r = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: SHEET_RANGE });
     const rows = r.data.values || [];
@@ -846,49 +955,65 @@ app.post('/api/backfill-thumbs', async (req, res) => {
     }
 
     // ── STEP 2: Thumbnail backfill ──────────────────────────────────────────
-    // Find rows across all three platforms with a URL but empty thumbnail cell.
-    // Row 1 is the header, so real data starts at index 1 → sheet row 2.
+    // Find rows across all three platforms that need a thumbnail. In normal
+    // mode we only process rows with a URL but no thumbnail yet. In force mode
+    // we ALSO process rows whose existing thumbnail isn't yet a Drive-hosted
+    // URL (lh3.googleusercontent.com) — those are the expired CDN links we
+    // want to swap out.
     const targets = [];
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       const platform = row[0];
       const url = row[3];
       const existingThumb = row[8];
-      if (url && !existingThumb && (platform === 'TikTok' || platform === 'Instagram' || platform === 'Facebook')) {
-        targets.push({ sheetRow: i + 1, url, platform });
-      }
+      if (!url) continue;
+      if (platform !== 'TikTok' && platform !== 'Instagram' && platform !== 'Facebook') continue;
+      const isDriveHosted = existingThumb && existingThumb.includes('lh3.googleusercontent.com');
+      // Skip rows that already have a permanent Drive URL — no work needed there.
+      if (isDriveHosted) continue;
+      // Skip rows that have an existing (short-lived CDN) URL unless force is on.
+      if (existingThumb && !force) continue;
+      targets.push({ sheetRow: i + 1, url, platform, creator: row[1] || '' });
     }
 
-    // Lower cap than TikTok-only since IG/FB HTML fetches are slower than a JSON oEmbed call.
-    // 100 rows at ~500ms average ≈ 50s worst case, comfortably under Render's ~100s ceiling.
-    const BATCH_CAP = 100;
+    // Lower cap than TikTok-only since IG/FB HTML fetches are slower than a JSON oEmbed call,
+    // and each rehost adds a Drive upload round-trip on top. 60 rows at ~1s average ≈ 60s,
+    // right at Render's ~100s ceiling with some safety margin.
+    const BATCH_CAP = 60;
     const batch = targets.slice(0, BATCH_CAP);
 
     const updates = []; // Google Sheets batchUpdate payload — one entry per cell we're writing
-    const stats = { tiktok: 0, instagram: 0, facebook: 0, failed: 0 };
+    const stats = { tiktok: 0, instagram: 0, facebook: 0, failed: 0, rehosted: 0 };
 
     for (const t of batch) {
       try {
-        let thumb = null;
+        // Step A: fetch the ephemeral CDN URL (oEmbed for TikTok, og:image for IG/FB).
+        let cdnThumb = null;
         if (t.platform === 'TikTok') {
-          thumb = await fetchTikTokOembedThumb(t.url);
-          if (thumb) stats.tiktok++;
+          cdnThumb = await fetchTikTokOembedThumb(t.url);
         } else {
-          // Instagram & Facebook both go through og:image extraction
-          thumb = await fetchOgImage(t.url);
-          if (thumb) {
-            if (t.platform === 'Instagram') stats.instagram++;
-            else stats.facebook++;
-          }
+          cdnThumb = await fetchOgImage(t.url);
         }
-        if (thumb) {
-          updates.push({
-            range: `'${SHEET_NAME}'!I${t.sheetRow}`,
-            values: [[thumb]],
-          });
-        } else {
+        if (!cdnThumb) { stats.failed++; continue; }
+
+        // Step B: rehost the CDN URL to Drive. This is the whole point of the
+        // change — even though the CDN URL works right now, it'll expire in
+        // 24-72h. By copying the bytes into Drive we get a permanent URL.
+        const filenameHint = `${t.platform}_${t.creator.replace(/^@/, '')}_${t.sheetRow}`;
+        const driveUrl = await rehostToDrive(drive, cdnThumb, filenameHint);
+        if (!driveUrl) {
+          // Rehost failed (Drive quota, network, permissions, etc). Fall back
+          // to the CDN URL so at least the thumbnail shows for a day or two.
+          // Better than leaving the cell blank when we DID successfully fetch.
+          updates.push({ range: `'${SHEET_NAME}'!I${t.sheetRow}`, values: [[cdnThumb]] });
           stats.failed++;
+          continue;
         }
+        updates.push({ range: `'${SHEET_NAME}'!I${t.sheetRow}`, values: [[driveUrl]] });
+        stats.rehosted++;
+        if (t.platform === 'TikTok') stats.tiktok++;
+        else if (t.platform === 'Instagram') stats.instagram++;
+        else stats.facebook++;
       } catch (e) {
         stats.failed++;
       }
@@ -904,12 +1029,14 @@ app.post('/api/backfill-thumbs', async (req, res) => {
       });
     }
 
-    console.log(`[Backfill] creators_fixed=${creatorsFixed} tt=${stats.tiktok} ig=${stats.instagram} fb=${stats.facebook} failed=${stats.failed} remaining=${Math.max(0, targets.length - batch.length)}`);
+    console.log(`[Backfill] force=${force} creators_fixed=${creatorsFixed} rehosted=${stats.rehosted} tt=${stats.tiktok} ig=${stats.instagram} fb=${stats.facebook} failed=${stats.failed} remaining=${Math.max(0, targets.length - batch.length)}`);
 
     res.json({
       ok: true,
+      force,
       checked: batch.length,
       updated: stats.tiktok + stats.instagram + stats.facebook,
+      rehosted: stats.rehosted,
       byPlatform: { tiktok: stats.tiktok, instagram: stats.instagram, facebook: stats.facebook },
       creatorsFixed,
       failed: stats.failed,
