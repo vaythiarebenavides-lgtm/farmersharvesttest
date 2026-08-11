@@ -817,10 +817,13 @@ async function runFullHarvest(sheets) {
     // Actor misses. Overlap is harmless — dedup by URL happens before the sheet write.
     ...FACEBOOK_SEARCH_QUERIES.map(q =>
       runApifyActor('scrapeforge~facebook-search-posts', {
-        searchQuery: q,
-        searchType: 'posts',
-        maxResults: 30,
-        recentPostsFirst: true,
+        // Parameter names are snake_case — confirmed by reading the Actor's own
+        // input JSON in the Apify console. camelCase equivalents are silently
+        // ignored, so do not "tidy" these to match the style of the other Actors.
+        query: q,
+        search_type: 'posts',
+        max_results: 40,
+        recent_posts: true,
       }, `Facebook(${q})`)
     ),
   ]);
