@@ -521,6 +521,10 @@ function parseFacebookSearchItems(items) {
 // only keep results actually pointing at facebook.com or instagram.com domains,
 // since the search query itself can sometimes return unrelated indexed pages too.
 // Defensive against multiple possible response shapes since we haven't seen a real sample yet.
+// UNUSED as of the Facebook search Actor migration — kept for reference only.
+// The apify~google-search-scraper run that fed this parser was removed because its
+// SERP-derived rows had no image, date, or engagement data. If that Actor is ever
+// reinstated, this parser still works; otherwise it can be deleted safely.
 function parseGoogleSearchItems(items) {
   if (!Array.isArray(items)) {
     console.error('[GoogleSearch] Expected an array of items but got:', typeof items);
@@ -745,7 +749,7 @@ async function runFullHarvest(sheets) {
     'farmersdefense',
   ];
 
-  const [tiktokRun, instagramRun, googleRun, ...facebookRuns] = await Promise.all([
+  const [tiktokRun, instagramRun, ...facebookRuns] = await Promise.all([
     runApifyActor('clockworks~tiktok-scraper', {
       // Only using verified brand-specific and product-specific hashtags. Generic ones
       // like #sleeves, #farmer, #uvprotection, #sunprotection, #testimonial, #gardeninggear
@@ -802,37 +806,19 @@ async function runFullHarvest(sheets) {
       addParentData: false,
     }, 'Instagram'),
 
-    runApifyActor('apify~google-search-scraper', {
-      // This Actor exists specifically as the Facebook workaround — Facebook has no
-      // scrapable public API/hashtag search, so we surface FB posts via Google Search.
-      // Instagram queries are kept as the original bonus-coverage design (some IG posts
-      // show up here that the IG scraper misses). Do NOT add TikTok or generic queries
-      // here — those belong in their own scrapers, not this one.
-      queries: [
-        'site:facebook.com "farmers defense" reels',
-        'site:facebook.com "farmers defense" video',
-        'site:facebook.com "farmers defense" gloves',
-        'site:facebook.com "farmersdefense"',
-        'site:instagram.com "farmers defense"',
-        'site:instagram.com "farmersdefense"',
-      ].join('\n'),
-      maxPagesPerQuery: 2,
-      mobileResults: false,
-      includeUnfilteredResults: false,
-      forceExactMatch: false,
-      saveHtml: false,
-      saveHtmlToKeyValueStore: false,
-    }, 'GoogleSearch(Facebook)'),
-
+    // NOTE: apify~google-search-scraper was removed here. It existed as a Facebook
+    // workaround back when there was no scrapable Facebook search — it found post
+    // URLs via Google SERP data. But SERP results carry no image, no post date, and
+    // no engagement numbers, so every row it produced landed in the sheet as a blank
+    // card (~104 rows per harvest at its peak, the single largest source of missing
+    // thumbnails). scrapeforge~facebook-search-posts below now covers Facebook
+    // properly with images, timestamps, reaction/view counts and real author names,
+    // making the Google path redundant as well as costly.
+    //
     // Real Facebook keyword search via scrapeforge~facebook-search-posts.
     // This Actor takes ONE query per run, so we fire three in parallel to cover the
-    // main brand-name variations. At $2.59/1000 results and 30 results each, the
-    // whole set costs roughly $0.23 per harvest — negligible next to the ~$1 the
-    // TikTok and Instagram scrapers already cost.
-    //
-    // This runs ALONGSIDE the Google Search actor rather than replacing it: Google
-    // still contributes bonus Instagram coverage plus occasional Facebook links this
-    // Actor misses. Overlap is harmless — dedup by URL happens before the sheet write.
+    // main brand-name variations. At $2.59/1000 results and 40 results each, the
+    // whole set costs roughly $0.31 per harvest.
     ...FACEBOOK_SEARCH_QUERIES.map(q =>
       runApifyActor('scrapeforge~facebook-search-posts', {
         // Parameter names are snake_case — confirmed by reading the Actor's own
@@ -864,21 +850,11 @@ async function runFullHarvest(sheets) {
     platformResults.instagram.count = rows.length;
   }
 
-  // Google Search (Facebook + bonus Instagram coverage) — search queries already require
-  // "farmers defense" explicitly, so this is mostly a safety net rather than the primary filter
-  platformResults.googleSearch = { ok: googleRun.ok, error: googleRun.error, count: 0 };
-  if (googleRun.ok) {
-    const rawRows = parseGoogleSearchItems(googleRun.items);
-    const rows = filterRelevant(rawRows, 'GoogleSearch');
-    allRows.push(...rows);
-    platformResults.googleSearch.count = rows.length;
-  }
-
-  // Facebook keyword search — one Actor run per query, results merged. Unlike the
-  // Google Search path these rows carry real dates, engagement counts, author names,
-  // and (for a subset of posts) an image URL that gets base64-encoded downstream.
-  // Every row still goes through filterRelevant so unrelated posts that merely match
-  // the search string get dropped before they reach the sheet.
+  // Facebook keyword search — one Actor run per query, results merged. These rows
+  // carry real dates, engagement counts, author names, and (for most posts) an image
+  // URL that gets base64-encoded downstream. Every row still goes through
+  // filterRelevant so unrelated posts that merely match the search string get dropped
+  // before they reach the sheet.
   const facebookOk = facebookRuns.some(r => r.ok);
   const facebookError = facebookRuns.find(r => !r.ok)?.error || null;
   platformResults.facebook = { ok: facebookOk, error: facebookError, count: 0 };
@@ -1032,7 +1008,7 @@ async function runFullHarvest(sheets) {
     writeError = err.message;
   }
 
-  const anyPlatformSucceeded = platformResults.tiktok.ok || platformResults.instagram.ok || platformResults.googleSearch.ok;
+  const anyPlatformSucceeded = platformResults.tiktok.ok || platformResults.instagram.ok || platformResults.facebook.ok;
 
   return {
     ok: anyPlatformSucceeded && !writeError,
