@@ -489,18 +489,52 @@ function parseFacebookSearchItems(items) {
         date = item.timestamp.split('T')[0];
       }
 
-      // Image, in priority order across both item shapes and all known carriers.
-      // album_preview may be an array of image objects or a single object depending
-      // on the post, so it's unwrapped defensively rather than assumed.
+      // Image extraction. The Actor has already surprised us twice — flattened vs
+      // nested shapes, and image data appearing under video_thumbnail/album_preview —
+      // so rather than enumerate every possible path, try the known ones first and
+      // then fall back to a bounded recursive search for any string that looks like
+      // an image URL. This is deliberately permissive: a wrong-but-valid image is far
+      // better than a blank card, and non-image URLs are filtered out by the check.
       const albumPreview = Array.isArray(item.album_preview) ? item.album_preview[0] : item.album_preview;
+      const looksLikeImageUrl = (s) =>
+        typeof s === 'string' &&
+        /^https?:\/\//.test(s) &&
+        (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(s) || /fbcdn|cdninstagram|scontent/i.test(s));
+
+      // Bounded depth-first search for the first image-looking URL inside a value.
+      // Depth-capped so a deeply nested or cyclic structure can't hang the harvest.
+      const findImageUrl = (val, depth = 0) => {
+        if (depth > 4 || val == null) return '';
+        if (typeof val === 'string') return looksLikeImageUrl(val) ? val : '';
+        if (Array.isArray(val)) {
+          for (const v of val) {
+            const found = findImageUrl(v, depth + 1);
+            if (found) return found;
+          }
+          return '';
+        }
+        if (typeof val === 'object') {
+          // Prefer conventional URL-ish keys before scanning everything else.
+          for (const k of ['uri', 'url', 'src', 'image', 'thumbnail']) {
+            if (val[k]) {
+              const found = findImageUrl(val[k], depth + 1);
+              if (found) return found;
+            }
+          }
+          for (const v of Object.values(val)) {
+            const found = findImageUrl(v, depth + 1);
+            if (found) return found;
+          }
+        }
+        return '';
+      };
+
       const thumb =
         item['image.uri'] ||                    // flattened single image
-        item.image?.uri ||                      // nested single image
-        (typeof item.image === 'string' ? item.image : '') ||
-        item.video_thumbnail?.uri ||            // video post cover, nested
-        (typeof item.video_thumbnail === 'string' ? item.video_thumbnail : '') ||
-        albumPreview?.uri ||                    // multi-photo post, first image
-        (typeof albumPreview === 'string' ? albumPreview : '') ||
+        findImageUrl(item.image) ||             // nested single image, any shape
+        findImageUrl(item.video_thumbnail) ||   // video post cover
+        findImageUrl(albumPreview) ||           // multi-photo post, first image
+        findImageUrl(item.video_files) ||       // video posts sometimes carry a poster here
         '';
 
       return {
@@ -932,11 +966,22 @@ async function runFullHarvest(sheets) {
       diagnosedPlatforms.add(platform);
       const raw = item._raw || null;
       if (raw && typeof raw === 'object') {
-        // Surface any key whose name hints at an image so we can spot the right
-        // field immediately, plus the full key list as a fallback.
+        // Print the actual VALUES of any image-like keys, not just their names.
+        // Key names alone proved insufficient: an item can have an `image` key that
+        // holds null, or a nested object keyed `url` rather than `uri`, and the name
+        // list looks identical in both cases. Values are truncated to keep the log
+        // readable while still showing the shape.
         const imageish = Object.keys(raw).filter(k => /image|thumb|display|cover|photo|media|pic|preview/i.test(k));
-        console.log(`[Thumbs][diag] ${platform}: no thumb. image-like keys = ${JSON.stringify(imageish)}`);
-        console.log(`[Thumbs][diag] ${platform}: all keys = ${JSON.stringify(Object.keys(raw))}`);
+        const shapes = {};
+        for (const k of imageish) {
+          let v = raw[k];
+          if (v === null || v === undefined) { shapes[k] = String(v); continue; }
+          if (typeof v === 'string') { shapes[k] = 'string: ' + v.slice(0, 80); continue; }
+          try {
+            shapes[k] = JSON.stringify(v).slice(0, 220);
+          } catch { shapes[k] = '(unserializable ' + typeof v + ')'; }
+        }
+        console.log(`[Thumbs][diag] ${platform}: no thumb. image-key VALUES = ${JSON.stringify(shapes)}`);
       } else {
         console.log(`[Thumbs][diag] ${platform}: no thumb and no raw item captured for inspection`);
       }
