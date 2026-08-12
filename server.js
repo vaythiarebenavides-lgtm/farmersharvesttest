@@ -1,6 +1,21 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const { google } = require('googleapis');
+const dns = require('dns');
+const https = require('https');
+
+// Render's free tier has no outbound IPv6 route. Node's default DNS ordering will
+// happily hand back an AAAA record for hosts like instagram.*.fna.fbcdn.net, and the
+// resulting connection dies immediately with ENETUNREACH. Forcing IPv4-first at the
+// resolver level fixes it process-wide. Facebook's scontent.* hosts happened to
+// resolve to IPv4 already, which is why only Instagram thumbnails were failing.
+dns.setDefaultResultOrder('ipv4first');
+
+// Belt-and-braces for image downloads specifically: an agent pinned to family 4 so
+// even if something re-orders DNS results, these requests can't attempt IPv6.
+// keepAlive because a refresh run fetches hundreds of images from a handful of hosts.
+const ipv4Agent = new https.Agent({ family: 4, keepAlive: true, timeout: 20000 });
+
 const app = express();
 
 app.use(express.json());
@@ -69,13 +84,27 @@ async function fetchAndEncodeThumb(imageUrl) {
   try {
     // Some IG/FB URLs 403 without a real-browser UA. Use one that matches
     // what our other fetches use so we don't get blocked differently here.
-    const imgRes = await fetch(imageUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-        'Accept': 'image/webp,image/*,*/*;q=0.8',
-      },
-    });
-    if (!imgRes.ok) return null;
+    // The ipv4Agent is essential on Render — see the note at the top of the file.
+    // One retry covers transient DNS/connection blips, which show up regularly when
+    // fetching a few hundred images in a row from the same CDN hosts.
+    let imgRes = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        imgRes = await fetch(imageUrl, {
+          agent: ipv4Agent,
+          timeout: 20000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+            'Accept': 'image/webp,image/*,*/*;q=0.8',
+          },
+        });
+        break;
+      } catch (netErr) {
+        if (attempt === 1) throw netErr;
+        await new Promise(r => setTimeout(r, 400));
+      }
+    }
+    if (!imgRes || !imgRes.ok) return null;
     const buffer = Buffer.from(await imgRes.arrayBuffer());
     if (buffer.length === 0) return null;
 
