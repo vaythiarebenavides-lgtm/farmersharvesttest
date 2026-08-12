@@ -768,7 +768,7 @@ app.post('/api/harvest-all', async (req, res) => {
 
 // The actual harvest logic, extracted so it can run in the background after we've
 // already responded to the triggering request above.
-async function runFullHarvest(sheets) {
+async function scrapeAllPlatforms() {
   const platformResults = {};
   const allRows = [];
 
@@ -901,6 +901,17 @@ async function runFullHarvest(sheets) {
     facebookTotal += rows.length;
   }
   platformResults.facebook.count = facebookTotal;
+
+  return { allRows, platformResults };
+}
+
+// Runs every scraper and returns the filtered rows, without touching the sheet.
+// Extracted from runFullHarvest so the thumbnail-refresh flow can reuse exactly the
+// same scraping and filtering logic — refresh differs only in what it does with the
+// results (update existing rows vs. append new ones), so sharing this guarantees the
+// two paths can't drift apart.
+async function runFullHarvest(sheets) {
+  const { allRows, platformResults } = await scrapeAllPlatforms();
 
   // Write everything to the sheet with deduplication by link, same logic as sheet-add
   let added = 0;
@@ -1065,6 +1076,124 @@ async function runFullHarvest(sheets) {
 }
 
 // Frontend polls this while a harvest is running to show live progress and final results
+// ── ONE-TIME THUMBNAIL REFRESH FOR EXISTING ROWS ───────────────────────────
+// Rows harvested before the base64 thumbnail work went in are sitting in the sheet
+// with either an empty thumbnail cell or an expired CDN URL. The backfill button
+// can't rescue them: it scrapes the post's own HTML, and Facebook/Instagram serve a
+// login wall to server-side requests.
+//
+// This does work, because the scrapers run a real browser and get past that wall.
+// Every harvest already re-scrapes a few hundred posts that are ALREADY in the sheet
+// (the "skipped as duplicates" count in the logs) and throws away their fresh image
+// URLs. This flow captures exactly those instead of discarding them.
+//
+// Deliberately conservative: it ONLY updates column I on rows that already exist and
+// currently lack a permanent thumbnail. It never appends a row, never edits any other
+// column, and never overwrites a thumbnail that's already base64. Safe to re-run.
+async function runThumbRefresh(sheets) {
+  const { allRows, platformResults } = await scrapeAllPlatforms();
+
+  // Pull the current sheet so we can match scraped posts to existing rows by URL,
+  // and see which of those rows still need a thumbnail.
+  const existing = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: SHEET_RANGE });
+  const rows = existing.data.values || [];
+
+  // Map URL -> sheet row number, but only for rows that actually need work. Rows
+  // whose thumbnail already starts with "data:image/" are permanent and get skipped,
+  // which keeps repeat runs cheap and avoids pointless re-encoding.
+  const needsThumb = new Map();
+  for (let i = 1; i < rows.length; i++) {
+    const url = rows[i][3];
+    const thumb = rows[i][8];
+    if (!url) continue;
+    if (thumb && thumb.startsWith('data:image/')) continue; // already permanent
+    needsThumb.set(url, i + 1); // sheet rows are 1-indexed and row 1 is the header
+  }
+
+  // Intersect: scraped posts that (a) correspond to a row already in the sheet and
+  // (b) came back with an image URL we can actually use.
+  const candidates = [];
+  const seenUrls = new Set();
+  for (const item of allRows) {
+    if (!item.url || !item.thumb) continue;
+    if (item.thumb.startsWith('data:image/')) continue;
+    const sheetRow = needsThumb.get(item.url);
+    if (!sheetRow) continue;
+    if (seenUrls.has(item.url)) continue; // same post can surface from several queries
+    seenUrls.add(item.url);
+    candidates.push({ sheetRow, url: item.url, thumb: item.thumb, platform: item.platform });
+  }
+
+  console.log(`[Refresh] ${needsThumb.size} sheet rows need a thumbnail; ${candidates.length} of them appeared in this scrape`);
+
+  // Encode in small parallel batches, same approach as the harvest path.
+  const CONCURRENCY = 5;
+  const updates = [];
+  const byPlatform = {};
+  let failed = 0;
+  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+    const slice = candidates.slice(i, i + CONCURRENCY);
+    await Promise.all(slice.map(async (c) => {
+      const dataUrl = await fetchAndEncodeThumb(c.thumb);
+      if (!dataUrl) { failed++; return; }
+      updates.push({ range: `'${SHEET_NAME}'!I${c.sheetRow}`, values: [[dataUrl]] });
+      byPlatform[c.platform] = (byPlatform[c.platform] || 0) + 1;
+    }));
+  }
+
+  // Single batched write — one request regardless of how many cells changed.
+  if (updates.length > 0) {
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: SHEET_ID,
+      requestBody: { valueInputOption: 'RAW', data: updates },
+    });
+  }
+
+  const stillMissing = Math.max(0, needsThumb.size - updates.length);
+  console.log(`[Refresh] Updated ${updates.length} rows, ${failed} failed to encode, ${stillMissing} rows still without a thumbnail`);
+
+  return {
+    ok: true,
+    rowsNeedingThumb: needsThumb.size,
+    matchedInScrape: candidates.length,
+    updated: updates.length,
+    failed,
+    stillMissing,
+    byPlatform,
+    platforms: platformResults,
+  };
+}
+
+// Refresh shares the harvest's job tracker so the two can't overlap — they hit the
+// same Actors and the same sheet, and running both at once would waste Apify credits
+// and risk interleaved writes.
+app.post('/api/refresh-existing-thumbs', async (req, res) => {
+  if (!APIFY_TOKEN) return res.status(500).json({ error: 'Apify token not configured on server' });
+  if (currentJob && currentJob.status === 'running') {
+    return res.status(409).json({ error: 'A harvest or refresh is already running. Please wait for it to finish.' });
+  }
+
+  let sheets;
+  try {
+    sheets = google.sheets({ version: 'v4', auth: getGoogleAuth() });
+  } catch (err) {
+    return res.status(500).json({ error: 'Could not connect to Google Sheets: ' + err.message });
+  }
+
+  // No cooldown check here. The cooldown exists to stop accidental repeat harvests
+  // running up cost; this is a deliberate one-off cleanup, and the frontend warns
+  // about the Apify cost before calling it.
+  currentJob = { status: 'running', startedAt: Date.now(), result: null, error: null, kind: 'refresh' };
+  res.json({ ok: true, message: 'Thumbnail refresh started. Poll /api/harvest-job-status for progress.' });
+
+  runThumbRefresh(sheets).then(result => {
+    currentJob = { status: 'done', startedAt: currentJob.startedAt, result, error: null, kind: 'refresh' };
+  }).catch(err => {
+    console.error('Thumb refresh failed:', err);
+    currentJob = { status: 'error', startedAt: currentJob.startedAt, result: null, error: err.message, kind: 'refresh' };
+  });
+});
+
 app.get('/api/harvest-job-status', (req, res) => {
   if (!currentJob) return res.json({ status: 'idle' });
   res.json(currentJob);
